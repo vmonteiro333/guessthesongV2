@@ -136,7 +136,7 @@ export class SoundCloudPlayer implements AudioPlayer {
     });
 
     // Nem toda versão do widget documenta/dispara ERROR; tratamos como opcional.
-    const errorEvent = (events as Record<string, string | undefined>).ERROR;
+    const errorEvent = events.ERROR;
     if (errorEvent) {
       widget.bind(errorEvent, () => {
         this.listeners.error.forEach((fn) =>
@@ -279,7 +279,7 @@ export class SoundCloudPlayer implements AudioPlayer {
           "ERROR",
         ] as const
       ).forEach((key) => {
-        const name = (events as Record<string, string | undefined>)[key];
+        const name = events[key];
         if (typeof name === "string") {
           try {
             widget.unbind(name);
