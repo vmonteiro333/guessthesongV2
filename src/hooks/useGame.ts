@@ -324,24 +324,32 @@ export function useGame(audio: UseSoundCloudResult): UseGameResult {
     const song = currentSong;
     if (!song) return;
 
-    const guessArtist = answer.artist;
     const guessTitle = answer.title;
+    const guessArtist = answer.artist;
 
-    // Resposta vazia: não consome a rodada nem pune o jogador.
-    if (normalizeText(guessArtist) === "" && normalizeText(guessTitle) === "") {
-      setFeedback({ kind: "invalid", message: "Digite pelo menos um palpite antes de tentar." });
+    // REGRA: o palpite é sempre uma música. Só o artista não é aceito.
+    if (normalizeText(guessTitle) === "") {
+      setFeedback({
+        kind: "invalid",
+        message: guessArtist.trim()
+          ? "Só o artista não vale: digite o nome da MÚSICA que você acha que é."
+          : "Digite o nome da música antes de tentar.",
+      });
       return;
     }
 
-    const outcome = evaluateGuess({ artist: guessArtist, title: guessTitle }, song);
+    const evaluation = evaluateGuess(
+      { title: guessTitle, artist: guessArtist },
+      song,
+      catalog
+    );
 
-    if (outcome === "correct") {
+    if (evaluation.outcome === "correct") {
       finalizeRound(true);
       return;
     }
 
-    if (outcome === "artist") {
-      // Amarelo: marca a descoberta; pontos finais saem SOMENTE no encerramento.
+    if (evaluation.outcome === "artist") {
       if (!roundRef.current.artistCorrect) {
         roundRef.current = { artistCorrect: true, artistAtStage: stageIndex };
         upsertHistory(song, {
@@ -351,16 +359,16 @@ export function useGame(audio: UseSoundCloudResult): UseGameResult {
           finalized: false,
         });
       }
+      const revealed = evaluation.matchedArtists.join(" e ");
       setFeedback({
         kind: "artist",
-        message: `Artista correto: ${song.artist}. Falta a música!`,
+        message: `Boa! ${revealed} participa dessa música. Falta acertar o título!`,
       });
-      setAnswer({ artist: song.artist, title: "" });
+      setAnswer({ artist: "", title: "" });
       return; // permanece em waiting_answer
     }
 
     if (isLastStage(stageIndex)) {
-      // Errou no último estágio: a rodada encerra (nenhum estágio adicional).
       finalizeRound(false);
       return;
     }

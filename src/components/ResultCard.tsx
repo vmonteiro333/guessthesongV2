@@ -4,7 +4,7 @@ type CardStatus = "solved" | "artist" | "failed" | "error";
 
 const STATUS_LABEL: Record<CardStatus, string> = {
   solved: "Acertou",
-  artist: "Só o artista",
+  artist: "Artista certo",
   failed: "Errou",
   error: "Indisponível",
 };
@@ -19,13 +19,14 @@ function getStatus(result: SongRoundResult): CardStatus {
 /** Cor + rótulo textual (não depende só de cor) + pontos quando houver. */
 export default function ResultCard({ result }: { result: SongRoundResult }) {
   const status = getStatus(result);
+  const showArtist = result.finalized;
   const revealTitle = result.titleCorrect || result.finalized;
   return (
     <article className={`result-card result-card--${status}`}>
       <span className={`dot dot--${status}`} aria-hidden="true" />
       <div className="result-info">
         <p className="result-names">
-          {result.artistCorrect ? result.artist : "Artista ???"}
+          {showArtist ? result.artist : "Artista ???"}
           <span className="result-sep" aria-hidden="true">
             {" — "}
           </span>

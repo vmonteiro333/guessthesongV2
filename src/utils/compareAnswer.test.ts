@@ -2,56 +2,94 @@ import { describe, expect, it } from "vitest";
 import { compareArtist, compareTitle, evaluateGuess } from "./compareAnswer";
 import type { Song } from "../types/song";
 
-const song: Song = {
-  id: "song-001",
-  title: "Blinding Lights",
-  artist: "The Weeknd",
-  soundcloudUrl: "https://soundcloud.com/artista/faixa",
+const target: Song = {
+  id: "alvo",
+  title: "Imagina esse cenário",
+  artist: "Matuê feat. Veigh",
+  soundcloudUrl: "https://soundcloud.com/a/b",
 };
 
-describe("compareArtist", () => {
-  it("aceita acentos, maiúsculas e espaços diferentes", () => {
-    expect(compareArtist("  beyoncé ", "Beyoncé")).toBe(true);
-  });
+const musicaDoVeigh: Song = {
+  id: "veigh-1",
+  title: "Talvez você precise de mim",
+  artist: "Veigh",
+  soundcloudUrl: "https://soundcloud.com/c/d",
+};
 
-  it("rejeita artista diferente", () => {
-    expect(compareArtist("beyonc", "Beyoncé")).toBe(false);
-  });
-
-  it("rejeita palpite vazio", () => {
-    expect(compareArtist("", "Beyoncé")).toBe(false);
-  });
-});
+const musicaAlheia: Song = {
+  id: "x",
+  title: "Evidências",
+  artist: "Chitãozinho & Xororó",
+  soundcloudUrl: "https://soundcloud.com/e/f",
+};
 
 describe("compareTitle", () => {
-  it("aceita variações de caixa/espaço", () => {
-    expect(compareTitle("blinding   lights", "Blinding Lights")).toBe(true);
+  it("ignora acentos, caixa e espaços", () => {
+    expect(compareTitle("imagina esse cenario", "Imagina esse cenário")).toBe(true);
   });
 
-  it("rejeita título diferente (sem fuzzy)", () => {
-    expect(compareTitle("blinding light", "Blinding Lights")).toBe(false);
+  it("aceita 'feat.' no palpite do título", () => {
+    expect(compareTitle("Imagina esse cenário feat. Veigh", "Imagina esse cenário")).toBe(true);
+  });
+
+  it("rejeita título diferente (sem fuzzy) e vazio", () => {
+    expect(compareTitle("imagina o cenario", "Imagina esse cenário")).toBe(false);
+    expect(compareTitle("", "Imagina esse cenário")).toBe(false);
   });
 });
 
-describe("evaluateGuess", () => {
-  it("artista + música corretos → correct", () => {
-    expect(evaluateGuess({ artist: "the weeknd", title: "Blinding Lights" }, song)).toBe("correct");
+describe("compareArtist", () => {
+  it("aceita nome completo e cada artista da dupla", () => {
+    expect(compareArtist("Jorge e Mateus", "Jorge & Mateus")).toBe(true);
+    expect(compareArtist("jorge", "Jorge & Mateus")).toBe(true);
+    expect(compareArtist("rihanna", "Calvin Harris feat. Rihanna")).toBe(true);
   });
 
-  it("apenas artista correto → artist", () => {
-    expect(evaluateGuess({ artist: "The Weeknd", title: "" }, song)).toBe("artist");
-    expect(evaluateGuess({ artist: "The Weeknd", title: "tik tok" }, song)).toBe("artist");
+  it("rejeita escritos que não batem", () => {
+    expect(compareArtist("jorge mateus", "Jorge & Mateus")).toBe(false);
+    expect(compareArtist("simone", "Jorge & Mateus")).toBe(false);
+  });
+});
+
+describe("evaluateGuess (mecânica v2)", () => {
+  it("música correta → correct, mesmo sem preencher o artista", () => {
+    expect(evaluateGuess({ title: "imagina esse cenario" }, target, []).outcome).toBe("correct");
   });
 
-  it("título correto sem artista NÃO encerra a rodada (regra documentada)", () => {
-    expect(evaluateGuess({ artist: "", title: "Blinding Lights" }, song)).toBe("wrong");
+  it("música errada de artista do alvo → artist (via campo artista)", () => {
+    const result = evaluateGuess(
+      { title: "Talvez você precise de mim", artist: "Veigh" },
+      target,
+      []
+    );
+    expect(result.outcome).toBe("artist");
+    expect(result.matchedArtists).toEqual(["Veigh"]);
   });
 
-  it("ambos errados → wrong", () => {
-    expect(evaluateGuess({ artist: "Queen", title: "Bohemian" }, song)).toBe("wrong");
+  it("música errada de artista do alvo → artist (via catálogo, sem digitar artista)", () => {
+    const result = evaluateGuess(
+      { title: "Talvez você precise de mim" },
+      target,
+      [target, musicaDoVeigh, musicaAlheia]
+    );
+    expect(result.outcome).toBe("artist");
+    expect(result.matchedArtists).toEqual(["Veigh"]);
   });
 
-  it("ambos vazios → wrong (o hook bloqueia antes de chegar aqui)", () => {
-    expect(evaluateGuess({ artist: "", title: "" }, song)).toBe("wrong");
+  it("qualquer artista do feat isolado também vira amarelo", () => {
+    expect(evaluateGuess({ title: "qualquer", artist: "Matuê" }, target, []).outcome).toBe(
+      "artist"
+    );
+  });
+
+  it("música de artista alheio → wrong", () => {
+    expect(
+      evaluateGuess({ title: "Evidências", artist: "Chitãozinho" }, target, [musicaAlheia]).outcome
+    ).toBe("wrong");
+  });
+
+  it("SÓ o artista (sem música) NUNCA vira amarelo", () => {
+    expect(evaluateGuess({ title: "", artist: "Matuê" }, target, []).outcome).toBe("wrong");
+    expect(evaluateGuess({ title: "   ", artist: "Matuê" }, target, []).outcome).toBe("wrong");
   });
 });
