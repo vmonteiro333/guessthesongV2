@@ -1,7 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// https://vitejs.dev/config/
 export default defineConfig({
+  // GitHub Pages (project site):
+  // https://vmonteiro333.github.io/guessthesongV2/
+  base: "/guessthesongV2/",
   plugins: [react()],
 });
