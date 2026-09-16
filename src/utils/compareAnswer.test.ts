@@ -92,4 +92,14 @@ describe("evaluateGuess (mecânica v2)", () => {
     expect(evaluateGuess({ title: "", artist: "Matuê" }, target, []).outcome).toBe("wrong");
     expect(evaluateGuess({ title: "   ", artist: "Matuê" }, target, []).outcome).toBe("wrong");
   });
+  
+  it("corta 'with' e 'bonus' do título cadastrado", () => {
+    expect(compareTitle("hey now", "Hey Now (with dody6)")).toBe(true);
+    expect(compareTitle("Londres Freestyle", "Londres Freestyle (Bônus)")).toBe(true);
+  });
+
+  it("não corta 'with' no início do título", () => {
+    expect(compareTitle("with you", "With You")).toBe(true);
+    expect(compareTitle("without me", "Without Me")).toBe(true); // 'without' intacto
+  });
 });

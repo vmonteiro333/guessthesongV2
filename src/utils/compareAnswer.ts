@@ -15,9 +15,6 @@ export interface GuessEvaluation {
   matchedArtists: string[];
 }
 
-/** Corta enfeites de título: "Música (feat. X)", "Música prod. Y"… */
-const TITLE_DECORATION = /\b(?:feat|ft|part|prod)\b.*$/;
-
 /** Separa artistas compostos: "A feat. B", "A & B", "A e B", "A, B"… */
 function splitArtistRaw(raw: string): string[] {
   return raw
@@ -50,13 +47,25 @@ function toNames(raws: readonly string[]): ArtistName[] {
   return names;
 }
 
+/**
+ * Corta enfeites de título (aplicado nos DOIS lados da comparação):
+ * "feat.", "ft.", "part", "prod", "bonus", "with", "ao vivo".
+ * Não corta se o enfeite iniciar o título (ex.: "With You" fica intacto).
+ */
+function stripTitleDecorations(norm: string): string {
+  const match = norm.match(/\b(?:feat|ft|part|prod|bonus|with|ao vivo)\b/);
+  if (!match || match.index === undefined || match.index === 0) return norm;
+  return norm.slice(0, match.index).trim();
+}
+
 export function compareTitle(guess: string, expected: string): boolean {
   const g = normalizeText(guess);
   const e = normalizeText(expected);
   if (g === "" || e === "") return false;
   if (g === e) return true;
-  const stripped = g.replace(TITLE_DECORATION, "").trim();
-  return stripped !== "" && stripped === e;
+  const gs = stripTitleDecorations(g);
+  const es = stripTitleDecorations(e);
+  return gs !== "" && es !== "" && gs === es;
 }
 
 export function compareArtist(guess: string, expected: string | readonly string[]): boolean {
@@ -67,8 +76,7 @@ export function compareArtist(guess: string, expected: string | readonly string[
 
 /**
  * Mecânica do palpite (v2):
- * 1. O palpite é sempre uma MÚSICA. Sem título, NUNCA vira amarelo
- *    (bloqueia "acertar só o artista").
+ * 1. O palpite é sempre uma MÚSICA. Sem título, NUNCA vira amarelo.
  * 2. Título igual ao alvo → "correct" (verde; encerra a rodada).
  * 3. Título diferente, mas o palpite é de um artista que PARTICIPA do
  *    alvo (campo artista e/ou título presente no catálogo) → "artist" (amarelo).
@@ -89,10 +97,11 @@ export function evaluateGuess(
 
   // Quem "assina" o palpite: artista digitado + artistas inferidos do catálogo.
   const attributionRaws: string[] = [guess.artist ?? ""];
-  const guessNorm = normalizeText(guess.title);
+  const guessTitleStripped = stripTitleDecorations(normalizeText(guess.title));
   for (const candidate of catalog) {
     if (candidate.id === song.id) continue;
-    if (normalizeText(candidate.title) === guessNorm) {
+    const candidateTitle = stripTitleDecorations(normalizeText(candidate.title));
+    if (candidateTitle !== "" && candidateTitle === guessTitleStripped) {
       attributionRaws.push(candidate.artist, ...(candidate.artistAliases ?? []));
     }
   }
