@@ -102,4 +102,17 @@ describe("evaluateGuess (mecânica v2)", () => {
     expect(compareTitle("with you", "With You")).toBe(true);
     expect(compareTitle("without me", "Without Me")).toBe(true); // 'without' intacto
   });
+  
+  it("artista com vírgula no nome aceita a forma sem vírgula via alias", () => {
+    const song: Song = {
+      id: "t",
+      title: "Mítico Jovem",
+      artist: "Ryu, The Runner, 6ee",
+      artistAliases: ["Ryu The Runner"],
+      soundcloudUrl: "",
+    };
+    expect(evaluateGuess({ title: "outra música", artist: "Ryu The Runner" }, song, []).outcome).toBe("artist");
+    expect(evaluateGuess({ title: "outra música", artist: "Ryu, The Runner" }, song, []).outcome).toBe("artist");
+    expect(evaluateGuess({ title: "outra música", artist: "6ee" }, song, []).outcome).toBe("artist");
+  });
 });
