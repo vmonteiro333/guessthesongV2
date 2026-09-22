@@ -7,9 +7,9 @@ import { computeRoundPoints } from "../utils/score";
 import { evaluateGuess } from "../utils/compareAnswer";
 import { normalizeText } from "../utils/normalizeText";
 import { shuffle } from "../utils/shuffle";
-import { isValidSoundCloudUrl } from "../utils/soundcloudUrl";
+import { isSpotifyTrackUrl } from "../utils/spotifyUrl";
 import { loadBestScore, saveBestScore } from "../utils/storage";
-import type { UseSoundCloudResult } from "./useSoundCloud";
+import type { UseAudioResult } from "./useAudio";
 
 const ERROR_ADVANCE_DELAY_MS = 3_000;
 
@@ -52,7 +52,7 @@ export interface UseGameResult {
  * Estado central do jogo. Não executa NENHUMA chamada direta ao widget:
  * toda a reprodução passa por useSoundCloud.
  */
-export function useGame(audio: UseSoundCloudResult): UseGameResult {
+export function useGame(audio: UseAudioResult): UseGameResult {
   const [gameStatus, setGameStatus] = useState<GameStatus>("idle");
   const [queue, setQueue] = useState<Song[]>([]);
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
@@ -155,15 +155,12 @@ export function useGame(audio: UseSoundCloudResult): UseGameResult {
     async (song: Song, token: number) => {
       setGameStatus("loading");
       try {
-        await audio.whenReady();
-        if (token !== loadSeqRef.current) return;
-
-        if (!isValidSoundCloudUrl(song.soundcloudUrl)) {
-          handleSongError(song, "O endereço do SoundCloud desta música parece inválido.");
+        const url = song.spotifyUrl?.trim() ?? "";
+        if (!isSpotifyTrackUrl(url)) {
+          handleSongError(song, "Sem spotifyUrl válida cadastrada para esta música.");
           return;
         }
-
-        await audio.loadTrack(song.soundcloudUrl);
+        await audio.loadTrack(url);
         if (token !== loadSeqRef.current) return;
         setFeedback(null);
         setGameStatus("ready");

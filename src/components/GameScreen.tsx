@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { UseGameResult, GuessFeedback } from "../hooks/useGame";
-import type { UseSoundCloudResult } from "../hooks/useSoundCloud";
+import type { UseAudioResult } from "../hooks/useAudio";
 import StageIndicator from "./StageIndicator";
-import SoundCloudPlayer from "./SoundCloudPlayer";
+import SpotifyEmbed from "./SpotifyEmbed";
 import AnswerForm from "./AnswerForm";
 import LoadingState from "./LoadingState";
 import ResultList from "./ResultList";
@@ -11,7 +11,7 @@ import { PlayIcon } from "./icons";
 
 interface GameScreenProps {
   game: UseGameResult;
-  audio: UseSoundCloudResult;
+  audio: UseAudioResult;
 }
 
 export default function GameScreen({ game, audio }: GameScreenProps) {
@@ -24,7 +24,6 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
   const canListen = gameStatus === "ready" || gameStatus === "waiting_answer";
   const isLastRound = currentSongIndex + 1 >= queue.length;
   const serviceFatal = audio.serviceStatus === "error";
-  const firstTrackUrl = queue[0]?.soundcloudUrl ?? "";
 
   return (
     <section className="game-screen" aria-label="Rodada atual">
@@ -32,7 +31,7 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
 
       {serviceFatal && (
         <div className="alert" role="alert">
-          <p>Não foi possível inicializar o player do SoundCloud.</p>
+          <p>Não foi possível inicializar o player do Spotify.</p>
           <p className="alert-detail">{audio.serviceError}</p>
           <button type="button" className="btn btn-ghost" onClick={() => window.location.reload()}>
             Recarregar página
@@ -40,23 +39,9 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
         </div>
       )}
 
-      {firstTrackUrl !== "" && (
-        <SoundCloudPlayer
-          trackUrl={firstTrackUrl}
-          blurred={!roundOver}
-          attachIframe={audio.attachIframe}
-        />
-      )}
+      <SpotifyEmbed blurred={!roundOver} attachContainer={audio.attachContainer} />
 
-      {gameStatus === "loading" && (
-        <LoadingState
-          message={
-            audio.serviceStatus === "ready"
-              ? "Carregando a próxima música…"
-              : "Preparando o player do SoundCloud…"
-          }
-        />
-      )}
+      {gameStatus === "loading" && <LoadingState message="Carregando a música…" />}
       {gameStatus === "error" && <LoadingState message="Pulando para a próxima música…" />}
 
       <FeedbackPanel feedback={feedback} />

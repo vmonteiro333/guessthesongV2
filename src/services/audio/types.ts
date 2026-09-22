@@ -1,14 +1,15 @@
 export type Unsubscribe = () => void;
 
 /**
- * Abstração do player. O resto da aplicação NÃO conhece SC.Widget —
- * apenas esta interface. A implementação concreta é SoundCloudPlayer.
+ * Abstração do player. O resto da aplicação NÃO conhece a IFrame API do
+ * Spotify — apenas esta interface. Implementação: SpotifyPlayer (embed
+ * oficial do Spotify, prévias públicas de 30s, sem login).
  */
 export interface AudioPlayer {
-  /** Garante a API do widget carregada e o widget construído. */
   init(): Promise<void>;
-  /** Carrega uma nova faixa no MESMO iframe (widget.load + callback). */
   load(url: string): Promise<void>;
+  /** Volta ao início e começa a tocar. */
+  playFromStart(): Promise<void>;
   play(): void;
   pause(): void;
   seekTo(milliseconds: number): void;

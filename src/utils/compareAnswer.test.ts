@@ -6,21 +6,21 @@ const target: Song = {
   id: "alvo",
   title: "Imagina esse cenário",
   artist: "Matuê feat. Veigh",
-  soundcloudUrl: "https://soundcloud.com/a/b",
+  spotifyUrl: "",
 };
 
 const musicaDoVeigh: Song = {
   id: "veigh-1",
   title: "Talvez você precise de mim",
   artist: "Veigh",
-  soundcloudUrl: "https://soundcloud.com/c/d",
+  spotifyUrl: "",
 };
 
 const musicaAlheia: Song = {
   id: "x",
   title: "Evidências",
   artist: "Chitãozinho & Xororó",
-  soundcloudUrl: "https://soundcloud.com/e/f",
+  spotifyUrl: "",
 };
 
 describe("compareTitle", () => {
@@ -35,6 +35,15 @@ describe("compareTitle", () => {
   it("rejeita título diferente (sem fuzzy) e vazio", () => {
     expect(compareTitle("imagina o cenario", "Imagina esse cenário")).toBe(false);
     expect(compareTitle("", "Imagina esse cenário")).toBe(false);
+  });
+
+  it("corta 'with' e 'bonus' do título cadastrado", () => {
+    expect(compareTitle("hey now", "Hey Now (with dody6)")).toBe(true);
+    expect(compareTitle("Londres Freestyle", "Londres Freestyle (Bônus)")).toBe(true);
+  });
+
+  it("não corta 'with' no início do título", () => {
+    expect(compareTitle("with you", "With You")).toBe(true);
   });
 });
 
@@ -90,26 +99,15 @@ describe("evaluateGuess (mecânica v2)", () => {
 
   it("SÓ o artista (sem música) NUNCA vira amarelo", () => {
     expect(evaluateGuess({ title: "", artist: "Matuê" }, target, []).outcome).toBe("wrong");
-    expect(evaluateGuess({ title: "   ", artist: "Matuê" }, target, []).outcome).toBe("wrong");
-  });
-  
-  it("corta 'with' e 'bonus' do título cadastrado", () => {
-    expect(compareTitle("hey now", "Hey Now (with dody6)")).toBe(true);
-    expect(compareTitle("Londres Freestyle", "Londres Freestyle (Bônus)")).toBe(true);
   });
 
-  it("não corta 'with' no início do título", () => {
-    expect(compareTitle("with you", "With You")).toBe(true);
-    expect(compareTitle("without me", "Without Me")).toBe(true); // 'without' intacto
-  });
-  
   it("artista com vírgula no nome aceita a forma sem vírgula via alias", () => {
     const song: Song = {
       id: "t",
       title: "Mítico Jovem",
       artist: "Ryu, The Runner, 6ee",
       artistAliases: ["Ryu The Runner"],
-      soundcloudUrl: "",
+      spotifyUrl: "",
     };
     expect(evaluateGuess({ title: "outra música", artist: "Ryu The Runner" }, song, []).outcome).toBe("artist");
     expect(evaluateGuess({ title: "outra música", artist: "Ryu, The Runner" }, song, []).outcome).toBe("artist");

@@ -442,10 +442,7 @@
   
   .sc-veil {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 166px;
+    inset: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -453,6 +450,18 @@
     gap: 8px;
     color: var(--text-muted);
     font-size: 0.92rem;
+    pointer-events: none;
+  }
+
+  .spotify-container iframe {
+    display: block;
+    width: 100%;
+    height: 152px;
+    border: 0;
+  }
+  
+  .sc-player--blurred .spotify-container iframe {
+    filter: blur(16px) saturate(0.8);
     pointer-events: none;
   }
   

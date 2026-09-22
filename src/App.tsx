@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useGame } from "./hooks/useGame";
-import { useSoundCloud } from "./hooks/useSoundCloud";
+import { useAudio } from "./hooks/useAudio";
 import GameHeader from "./components/GameHeader";
 import GameScreen from "./components/GameScreen";
 import GameOver from "./components/GameOver";
@@ -9,7 +9,7 @@ import EmptyState from "./components/EmptyState";
 import { songs as catalog } from "./data/songs";
 
 export default function App() {
-  const audio = useSoundCloud();
+  const audio = useAudio();
   const game = useGame(audio);
   const { gameStatus } = game;
 
