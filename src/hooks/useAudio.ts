@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SpotifyWebPlayer } from "../services/audio/SpotifyWebPlayer";
+import { getSpotifyWebPlayer } from "../services/audio/SpotifyWebPlayer";
 import {
   handleAuthRedirect,
   isNotLoggedInError,
@@ -13,7 +13,7 @@ export type SnippetResult = "completed" | "stopped";
 const POLL_INTERVAL_MS = 50;
 const HARD_ELAPSED_SLACK_MS = 2_000;
 const ABSOLUTE_FAILSAFE_MS = 5_000;
-const PLAYBACK_START_TIMEOUT_MS = 10_000;
+const PLAYBACK_EVIDENCE_TIMEOUT_MS = 8_000;
 
 export interface UseAudioResult {
   serviceStatus: PlayerServiceStatus;
@@ -25,24 +25,22 @@ export interface UseAudioResult {
 }
 
 /**
- * Sessão de áudio do jogo via Web Playback SDK (áudio completo, Premium).
- * Fluxo de boot: processa retorno do login → tem tokens? → conecta device.
+ * Sessão de áudio via Web Playback SDK (áudio completo, Premium).
+ * O player é um SINGLETON de página (sobrevive ao remount do StrictMode).
  */
 export function useAudio(): UseAudioResult {
   const [serviceStatus, setServiceStatus] = useState<PlayerServiceStatus>("boot");
   const [serviceError, setServiceError] = useState<string | null>(null);
-  const playerRef = useRef<SpotifyWebPlayer | null>(null);
   const sessionRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
-    const player = new SpotifyWebPlayer();
-    playerRef.current = player;
+    const player = getSpotifyWebPlayer();
     const unsubscribeFatal = player.onError((message) => {
       setServiceError(message);
     });
 
-    (async () => {
+    void (async () => {
       setServiceStatus("connecting");
       try {
         await handleAuthRedirect();
@@ -67,9 +65,7 @@ export function useAudio(): UseAudioResult {
           setServiceStatus("needs_login");
         } else {
           setServiceStatus("error");
-          setServiceError(
-            error instanceof Error ? error.message : "Falha ao conectar ao Spotify."
-          );
+          setServiceError(error instanceof Error ? error.message : "Falha ao conectar ao Spotify.");
         }
       }
     })();
@@ -78,8 +74,6 @@ export function useAudio(): UseAudioResult {
       cancelled = true;
       unsubscribeFatal();
       sessionRef.current += 1;
-      player.destroy();
-      if (playerRef.current === player) playerRef.current = null;
     };
   }, []);
 
@@ -87,21 +81,25 @@ export function useAudio(): UseAudioResult {
     void startLogin();
   }, []);
 
+  /** Carrega a faixa da rodada e PRÉ-BUFFERIZA (priming) em volume mudo. */
   const loadTrack = useCallback(async (url: string): Promise<void> => {
-    const player = playerRef.current;
-    if (!player) throw new Error("O player do Spotify ainda não está pronto.");
-    sessionRef.current += 1; // interrompe qualquer snippet em curso
+    const player = getSpotifyWebPlayer();
+    sessionRef.current += 1;
     await player.load(url);
+    try {
+      await player.prime();
+    } catch {
+      /* sem priming: o buffer acontece no primeiro play */
+    }
   }, []);
 
   /**
-   * Toca a música DO ZERO (comando de play com position_ms=0) e corta no
-   * limite do estágio. O corte usa a posição interpolada localmente — muito
-   * mais precisa que o iframe — com redes de segurança de relógio.
+   * Toca a música DO ZERO e corta no limite do estágio. O corte monitora
+   * desde já e usa a posição real do áudio; com o priming, a evidência chega
+   * rápido e o corte fica preciso até no primeiro play.
    */
   const playSnippet = useCallback(async (limitSeconds: number): Promise<SnippetResult> => {
-    const player = playerRef.current;
-    if (!player) throw new Error("O player do Spotify ainda não está pronto.");
+    const player = getSpotifyWebPlayer();
 
     const session = ++sessionRef.current;
     const limitMs = Math.max(50, Math.round(limitSeconds * 1000));
@@ -112,8 +110,7 @@ export function useAudio(): UseAudioResult {
       return "stopped";
     }
 
-    // Espera o Connect começar a tocar de fato (buffering), sem travar.
-    await player.waitForPlaybackStart(PLAYBACK_START_TIMEOUT_MS);
+    await player.waitForPlaybackEvidence(PLAYBACK_EVIDENCE_TIMEOUT_MS);
     if (session !== sessionRef.current) {
       player.pause();
       return "stopped";
@@ -122,50 +119,56 @@ export function useAudio(): UseAudioResult {
     return new Promise<SnippetResult>((resolve) => {
       let settled = false;
       let pollTimer = 0;
+      let slackTimer = 0;
       let failsafeTimer = 0;
-      let unsubscribeProgress: () => void = () => {};
       let unsubscribeFinish: () => void = () => {};
 
       const finish = (result: SnippetResult) => {
         if (settled) return;
         settled = true;
         window.clearInterval(pollTimer);
+        window.clearTimeout(slackTimer);
         window.clearTimeout(failsafeTimer);
-        unsubscribeProgress();
         unsubscribeFinish();
-        if (result === "completed") player.pause();
+        if (result === "completed") {
+          player.pause();
+          const mySession = sessionRef.current;
+          void player.enforceStop(4_000, () => sessionRef.current !== mySession);
+        }
         resolve(result);
       };
 
-      const check = (position: number) => {
-        if (settled) return;
-        if (session !== sessionRef.current) {
-          finish("stopped");
-          return;
-        }
-        if (position >= limitMs) finish("completed");
-      };
-
-      unsubscribeProgress = player.onProgress(check);
-      unsubscribeFinish = player.onFinish(() => finish("completed"));
-
-      const startedAt = performance.now();
+      // O corte usa a posição real/interpolada — se o áudio já passou do
+      // limite quando a evidência chega, corta no primeiro tick.
       pollTimer = window.setInterval(() => {
         if (settled) return;
-        if (performance.now() - startedAt >= limitMs + HARD_ELAPSED_SLACK_MS) {
-          finish("completed");
-          return;
-        }
-        void player.getPosition().then(check).catch(() => {});
+        void player
+          .getPosition()
+          .then((position) => {
+            if (settled) return;
+            if (session !== sessionRef.current) {
+              finish("stopped");
+              return;
+            }
+            if (position >= limitMs) finish("completed");
+          })
+          .catch(() => {});
       }, POLL_INTERVAL_MS);
 
+      unsubscribeFinish = player.onFinish(() => finish("completed"));
+
+      // Redes de segurança finais (contadas desde já, generosas de propósito).
+      slackTimer = window.setTimeout(() => finish("completed"), limitMs + HARD_ELAPSED_SLACK_MS);
       failsafeTimer = window.setTimeout(() => finish("completed"), limitMs + ABSOLUTE_FAILSAFE_MS);
     });
   }, []);
 
   const stopPlayback = useCallback((): void => {
     sessionRef.current += 1;
-    playerRef.current?.pause();
+    const player = getSpotifyWebPlayer();
+    const mySession = sessionRef.current;
+    player.pause();
+    void player.enforceStop(4_000, () => sessionRef.current !== mySession);
   }, []);
 
   return { serviceStatus, serviceError, login, loadTrack, playSnippet, stopPlayback };

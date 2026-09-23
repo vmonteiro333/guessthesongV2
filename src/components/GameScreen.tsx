@@ -31,7 +31,7 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
 
       {serviceFatal && (
         <div className="alert" role="alert">
-          <p>Não foi possível inicializar o player do Spotify.</p>
+          <p>O player do Spotify reportou um erro.</p>
           <p className="alert-detail">{audio.serviceError}</p>
           <button type="button" className="btn btn-ghost" onClick={() => window.location.reload()}>
             Recarregar página
@@ -39,7 +39,7 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
         </div>
       )}
 
-            <NowPlayingPanel
+      <NowPlayingPanel
         secret={!roundOver}
         playing={gameStatus === "playing"}
         song={
@@ -48,6 +48,12 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
             : null
         }
       />
+
+      {gameStatus === "loading" && <LoadingState message="Carregando a música…" />}
+      {gameStatus === "error" && <LoadingState message="Pulando para a próxima música…" />}
+
+      <FeedbackPanel feedback={feedback} />
+
       {canType && !serviceFatal && (
         <>
           <div className="listen-row">

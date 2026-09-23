@@ -42,9 +42,7 @@ export interface SpotifyWebPlaybackPlayer {
 
 declare global {
   interface Window {
-    onSpotifyWebPlaybackSDKReady?: (Spotify: {
-      Player: new (options: SpotifyPlayerOptions) => SpotifyWebPlaybackPlayer;
-    }) => void;
+    onSpotifyWebPlaybackSDKReady?: () => void;
     Spotify?: {
       Player: new (options: SpotifyPlayerOptions) => SpotifyWebPlaybackPlayer;
     };

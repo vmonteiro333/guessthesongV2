@@ -1,7 +1,7 @@
 import type {
   SpotifyWebPlaybackPlayer,
   SpotifyWebPlaybackState,
-} from "../../types/spotifySdk";
+} from "../../types/spotify";
 import type { AudioPlayer, Unsubscribe } from "./types";
 import { toSpotifyUri } from "../../utils/spotifyUrl";
 import { getValidAccessToken, isNotLoggedInError } from "./spotifyAuth";
@@ -10,32 +10,50 @@ const SDK_SCRIPT_URL = "https://sdk.scdn.co/spotify-player.js";
 const SDK_READY_TIMEOUT_MS = 15_000;
 const CONNECT_TIMEOUT_MS = 15_000;
 const TICK_INTERVAL_MS = 100;
+const PRIME_HOLD_MS = 600;
 const DEVICE_NAME = "Guess the Song";
 
-let sdkPromise: Promise<{
+interface SpotifySdk {
   Player: new (options: {
     name: string;
     getOAuthToken: (cb: (token: string) => void) => void;
     volume?: number;
   }) => SpotifyWebPlaybackPlayer;
-} | null> | null = null;
+}
 
-function loadSdk(): Promise<NonNullable<typeof sdkPromise>> {
+let sdkPromise: Promise<SpotifySdk> | null = null;
+
+/** Carrega o Web Playback SDK OFICIAL uma única vez (idempotente). */
+function loadSdk(): Promise<SpotifySdk> {
   if (sdkPromise) return sdkPromise;
-  sdkPromise = new Promise((resolve, reject) => {
+  sdkPromise = new Promise<SpotifySdk>((resolve, reject) => {
     const timer = window.setTimeout(() => {
       sdkPromise = null;
       reject(new Error("O SDK do Spotify demorou demais para carregar."));
     }, SDK_READY_TIMEOUT_MS);
-    window.onSpotifyWebPlaybackSDKReady = (Spotify) => {
+
+    // O SDK chama este callback SEM argumentos; o objeto fica em window.Spotify.
+    window.onSpotifyWebPlaybackSDKReady = () => {
       window.clearTimeout(timer);
-      resolve(Spotify);
+      if (window.Spotify?.Player) {
+        resolve(window.Spotify);
+      } else {
+        sdkPromise = null;
+        reject(new Error("SDK do Spotify carregado sem a API esperada."));
+      }
     };
+
     if (window.Spotify) {
       window.clearTimeout(timer);
       resolve(window.Spotify);
       return;
     }
+
+    const existing = document.querySelector<HTMLScriptElement>(
+      `script[src="${SDK_SCRIPT_URL}"]`
+    );
+    if (existing) return;
+
     const script = document.createElement("script");
     script.src = SDK_SCRIPT_URL;
     script.async = true;
@@ -59,25 +77,30 @@ function safeCall<A extends unknown[]>(fn: (...args: A) => void, ...args: A): vo
 
 /**
  * Player de áudio completo via Web Playback SDK (Spotify Connect + Premium).
- * - Posição monitorada LOCALMENTE (snapshot do estado + relógio), então o
- *   corte do trecho é preciso (~100ms), sem latência de iframe.
- * - playFromStart usa a Web API (PUT /me/player/play, position_ms=0): o
- *   reinício do zero é comandado pelo servidor, não depende de seek.
+ * SINGLETON de vida útil da página. Controle de trechos:
+ * - Ticker local (100ms) emite a posição interpolada e re-ancora com
+ *   getCurrentState() quando ele traz posição real (> 0).
+ * - "Fim de faixa" só é aceito com posição no fim real (position ≈ duration)
+ *   ou estado nulo longe de um comando de play — elimina falsos finais
+ *   disparados por estados intermediários de buffering.
+ * - prime(): pré-bufferiza a faixa em volume 0 no carregamento da rodada,
+ *   para o primeiro play do usuário ser imediato e o corte ser preciso.
  */
 export class SpotifyWebPlayer implements AudioPlayer {
   private player: SpotifyWebPlaybackPlayer | null = null;
   private deviceId: string | null = null;
   private trackUri: string | null = null;
   private destroyed = false;
+  private connectPromise: Promise<void> | null = null;
 
   private positionMs = 0;
   private durationMs = 0;
   private paused = true;
   private snapshotAt = 0;
   private tickTimer = 0;
-  private seenPlayingAfterPlay = false;
   private suppressFinishUntil = 0;
   private wasPlaying = false;
+  private playCommandAt = 0;
 
   private readyWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
   private playbackStartWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
@@ -91,55 +114,70 @@ export class SpotifyWebPlayer implements AudioPlayer {
     error: new Set<(message: string) => void>(),
   };
 
-  async init(): Promise<void> {
-    if (this.destroyed) throw new Error("O player foi encerrado.");
-    if (this.player) return;
+  /** Idempotente: chamadas repetidas compartilham a mesma conexão. */
+  init(): Promise<void> {
+    if (!this.connectPromise) {
+      this.connectPromise = this.doInit().catch((error) => {
+        this.connectPromise = null;
+        throw error;
+      });
+    }
+    return this.connectPromise;
+  }
 
+  private async doInit(): Promise<void> {
+    this.destroyed = false;
     const Spotify = await loadSdk();
-    if (this.destroyed || !Spotify?.Player) return;
+    if (!Spotify?.Player) {
+      throw new Error("SDK do Spotify carregado de forma inválida.");
+    }
 
-    const player = new Spotify.Player({
-      name: DEVICE_NAME,
-      getOAuthToken: (cb) => {
-        getValidAccessToken()
-          .then(cb)
-          .catch((error) => {
-            if (isNotLoggedInError(error)) {
-              this.failConnection("Sessão do Spotify expirada — conecte-se novamente.");
-            } else {
-              this.emitError(
-                error instanceof Error ? error.message : "Falha ao obter o token do Spotify."
-              );
-            }
-          });
-      },
-      volume: 1,
-    });
-    this.player = player;
+    if (!this.player) {
+      const player = new Spotify.Player({
+        name: DEVICE_NAME,
+        getOAuthToken: (cb) => {
+          getValidAccessToken()
+            .then(cb)
+            .catch((error) => {
+              if (isNotLoggedInError(error)) {
+                this.failConnection("Sessão do Spotify expirada — conecte-se novamente.");
+              } else {
+                this.emitError(
+                  error instanceof Error ? error.message : "Falha ao obter o token do Spotify."
+                );
+              }
+            });
+        },
+        volume: 1,
+      });
+      this.player = player;
 
-    player.addListener("ready", ({ device_id }) => {
-      this.deviceId = device_id;
-      const waiters = this.readyWaiters;
-      this.readyWaiters = [];
-      waiters.forEach((w) => w.resolve());
-      this.listeners.ready.forEach((fn) => safeCall(fn));
-    });
-    player.addListener("player_state_changed", (state) => this.handleState(state));
-    player.addListener("initialization_error", ({ message }) =>
-      this.failConnection("Falha ao iniciar o player do Spotify: " + message)
-    );
-    player.addListener("authentication_error", ({ message }) =>
-      this.failConnection("Autenticação do Spotify falhou (" + message + "). Conecte-se novamente.")
-    );
-    player.addListener("account_error", () =>
-      this.failConnection("Esta conta não é Premium — o áudio completo exige Spotify Premium.")
-    );
-    player.addListener("playback_error", ({ message }) =>
-      this.emitError("Erro de reprodução do Spotify: " + message)
-    );
+      player.addListener("ready", ({ device_id }) => {
+        this.deviceId = device_id;
+        const waiters = this.readyWaiters;
+        this.readyWaiters = [];
+        waiters.forEach((w) => w.resolve());
+        this.listeners.ready.forEach((fn) => safeCall(fn));
+      });
+      player.addListener("player_state_changed", (state) => this.handleState(state));
+      player.addListener("initialization_error", ({ message }) =>
+        this.failConnection("Falha ao iniciar o player do Spotify: " + message)
+      );
+      player.addListener("authentication_error", ({ message }) =>
+        this.failConnection("Autenticação do Spotify falhou (" + message + "). Conecte-se novamente.")
+      );
+      player.addListener("account_error", () =>
+        this.failConnection("Esta conta não é Premium — o áudio completo exige Spotify Premium.")
+      );
+      player.addListener("playback_error", ({ message }) =>
+        this.emitError("Erro de reprodução do Spotify: " + message)
+      );
+    }
 
+    if (this.deviceId) return;
+
+    const player = this.player;
     const connected = await player.connect();
-    if (this.destroyed) return;
     if (!connected) throw new Error("Não foi possível conectar o device do Spotify.");
 
     await new Promise<void>((resolve, reject) => {
@@ -160,9 +198,21 @@ export class SpotifyWebPlayer implements AudioPlayer {
     });
   }
 
+  private getLocalState(): SpotifyWebPlaybackState | null {
+    try {
+      return this.player?.getCurrentState() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private handleState(state: SpotifyWebPlaybackState | null): void {
     if (!state) {
-      if (this.wasPlaying) {
+      // Estado nulo normalmente significa "fim da faixa/fila" — mas também
+      // aparece em transições. Guard: só aceita como fim se estamos longe
+      // de um comando de play recente.
+      const sinceCommand = performance.now() - this.playCommandAt;
+      if (this.wasPlaying && sinceCommand > 3000) {
         this.wasPlaying = false;
         this.paused = true;
         this.stopTicker();
@@ -176,8 +226,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
     this.paused = state.paused;
 
     if (!state.paused) {
-      this.wasPlaying = true;
-      this.seenPlayingAfterPlay = true;
+      this.wasPlaying = true;   
       const waiters = this.playbackStartWaiters;
       this.playbackStartWaiters = [];
       waiters.forEach((w) => w.resolve());
@@ -186,8 +235,11 @@ export class SpotifyWebPlayer implements AudioPlayer {
     } else {
       this.stopTicker();
       this.listeners.pause.forEach((fn) => safeCall(fn));
+      // Fim de faixa REAL: posição no fim. Estados intermediários de
+      // buffering (position ~0 logo após um play) NÃO são fim.
       const selfPaused = Date.now() < this.suppressFinishUntil;
-      if (!selfPaused && this.wasPlaying && state.position <= 60 && this.durationMs > 30_000) {
+      const nearEnd = this.durationMs > 0 && state.position >= this.durationMs - 1000;
+      if (!selfPaused && this.wasPlaying && nearEnd) {
         this.wasPlaying = false;
         this.listeners.finish.forEach((fn) => safeCall(fn));
       }
@@ -201,11 +253,21 @@ export class SpotifyWebPlayer implements AudioPlayer {
     return this.durationMs > 0 ? Math.min(interpolated, this.durationMs) : interpolated;
   }
 
+  /** Emite progresso e re-ancora com o estado real quando ele traz posição. */
+  private tick(): void {
+    if (!this.paused) {
+      const state = this.getLocalState();
+      if (state && !state.paused && state.position > 0) {
+        this.positionMs = state.position;
+        this.snapshotAt = performance.now();
+      }
+    }
+    this.listeners.progress.forEach((fn) => safeCall(fn, this.currentPosition()));
+  }
+
   private startTicker(): void {
     if (this.tickTimer !== 0) return;
-    this.tickTimer = window.setInterval(() => {
-      this.listeners.progress.forEach((fn) => safeCall(fn, this.currentPosition()));
-    }, TICK_INTERVAL_MS);
+    this.tickTimer = window.setInterval(() => this.tick(), TICK_INTERVAL_MS);
   }
 
   private stopTicker(): void {
@@ -215,7 +277,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
     }
   }
 
-  /** Valida e guarda a faixa da rodada (sem rede — Connect não tem preload). */
+  /** Valida e guarda a faixa da rodada. */
   async load(url: string): Promise<void> {
     if (this.destroyed) throw new Error("O player foi encerrado.");
     const uri = toSpotifyUri(url);
@@ -225,22 +287,45 @@ export class SpotifyWebPlayer implements AudioPlayer {
     this.trackUri = uri;
   }
 
+  /**
+   * PRIMING: pré-bufferiza a faixa em volume 0 (best-effort). Chamar logo
+   * após load(), no contexto do clique que trocou a música. Com o buffer
+   * pronto, o play do usuário começa quase instantâneo e o corte do trecho
+   * fica preciso já no primeiro play.
+   */
+  async prime(): Promise<void> {
+    if (this.destroyed || !this.player || !this.deviceId || !this.trackUri) return;
+    try {
+      await this.player.setVolume(0);
+      await this.sendPlayCommand(0, 0);
+      await new Promise((r) => setTimeout(r, PRIME_HOLD_MS));
+      this.suppressFinishUntil = Date.now() + 4000;
+      await this.sendPauseCommand();
+    } catch {
+      /* priming é best-effort: falha = comportamento antigo (buffer no play) */
+    }
+    try {
+      await this.player.setVolume(1);
+    } catch {
+      /* noop */
+    }
+  }
+
   async playFromStart(): Promise<void> {
-    if (this.destroyed) throw new Error("O player foi encerrado.");
-    if (!this.player) throw new Error("Player do Spotify não inicializado.");
+    if (!this.player) throw new Error("Player do Spotify não inicializado — recarregue a página.");
     if (!this.trackUri) throw new Error("Nenhuma música carregada.");
     if (!this.deviceId) {
       throw new Error("Device do Spotify desconectado — recarregue a página.");
     }
 
-    // Primeiro comando do clique: desbloqueia o áudio do navegador.
     try {
       await this.player.activateElement();
     } catch {
       /* navegadores que dispensam o unlock */
     }
 
-    this.seenPlayingAfterPlay = false;
+    this.playCommandAt = performance.now();
+    this.wasPlaying = false;
     this.positionMs = 0;
     this.snapshotAt = performance.now();
     this.paused = true;
@@ -274,22 +359,70 @@ export class SpotifyWebPlayer implements AudioPlayer {
     }
   }
 
-  /** Resolve quando o Connect COMEÇA a tocar de fato (após o buffering). */
-  async waitForPlaybackStart(timeoutMs: number): Promise<void> {
-    if (this.seenPlayingAfterPlay) return;
-    await new Promise<void>((resolve) => {
-      const timer = window.setTimeout(() => resolve(), timeoutMs);
-      this.playbackStartWaiters.push({
-        resolve: () => {
-          window.clearTimeout(timer);
-          resolve();
-        },
-        reject: () => {
-          window.clearTimeout(timer);
-          resolve();
-        },
-      });
-    });
+  private async sendPauseCommand(): Promise<void> {
+    if (!this.deviceId) return;
+    const token = await getValidAccessToken();
+    await fetch(
+      "https://api.spotify.com/v1/me/player/pause?device_id=" +
+        encodeURIComponent(this.deviceId),
+      { method: "PUT", headers: { Authorization: "Bearer " + token } }
+    );
+  }
+
+  /**
+   * Espera evidência de playback não-pausado (evento ou getCurrentState).
+   * Retorna a âncora do "zero" do áudio (performance.now correspondente à
+   * posição 0). Timeout longo: com buffering, a evidência só chega quando o
+   * áudio de fato roda; o corte usa a posição real, então corta assim que
+   * detecta que o limite já foi atingido.
+   */
+  async waitForPlaybackEvidence(timeoutMs: number): Promise<number> {
+    const start = performance.now();
+    for (;;) {
+      if (this.destroyed) throw new Error("O player foi encerrado.");
+      const state = this.getLocalState();
+      if (state && !state.paused) {
+        this.positionMs = state.position;
+        this.snapshotAt = performance.now();
+        this.paused = false;
+        return performance.now() - Math.max(0, state.position);
+      }
+      if (performance.now() - start >= timeoutMs) {
+        // Fallback: assume início agora (enforceStop cobre excessos).
+        this.paused = false;
+        this.snapshotAt = performance.now();
+        this.positionMs = 0;
+        return performance.now();
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+
+  /** Garante que o áudio PAROU (pause local pode cair no buffering). */
+  async enforceStop(maxMs: number, isCancelled?: () => boolean): Promise<void> {
+    const deadline = performance.now() + maxMs;
+    let webApiPauses = 0;
+    if (this.deviceId) {
+      void this.sendPauseCommand().catch(() => {});
+      webApiPauses += 1;
+    }
+    while (performance.now() < deadline) {
+      if (isCancelled?.()) return;
+      const state = this.getLocalState();
+      if (state && state.paused) return;
+      if (state && !state.paused) {
+        try {
+          await this.player?.pause();
+        } catch {
+          /* noop */
+        }
+        if (webApiPauses < 3 && this.deviceId) {
+          void this.sendPauseCommand().catch(() => {});
+          webApiPauses += 1;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
   }
 
   play(): void {
@@ -314,8 +447,6 @@ export class SpotifyWebPlayer implements AudioPlayer {
   }
 
   destroy(): void {
-    if (this.destroyed) return;
-    this.destroyed = true;
     this.stopTicker();
     try {
       this.player?.disconnect();
@@ -328,17 +459,18 @@ export class SpotifyWebPlayer implements AudioPlayer {
     const startWaiters = this.playbackStartWaiters;
     this.playbackStartWaiters = [];
     startWaiters.forEach((w) => w.reject(new Error("O player foi encerrado.")));
-    (Object.keys(this.listeners) as Array<keyof typeof this.listeners>).forEach((key) => {
-      this.listeners[key].clear();
-    });
     this.player = null;
     this.deviceId = null;
+    this.trackUri = null;
+    this.connectPromise = null;
+    this.destroyed = true;
   }
 
   private failConnection(message: string): void {
     const waiters = this.readyWaiters;
     this.readyWaiters = [];
     waiters.forEach((w) => w.reject(new Error(message)));
+    this.connectPromise = null;
     this.emitError(message);
   }
 
@@ -371,4 +503,12 @@ export class SpotifyWebPlayer implements AudioPlayer {
       set.delete(listener);
     };
   }
+}
+
+// ---- Singleton de vida útil da página ----
+let singleton: SpotifyWebPlayer | null = null;
+
+export function getSpotifyWebPlayer(): SpotifyWebPlayer {
+  if (!singleton) singleton = new SpotifyWebPlayer();
+  return singleton;
 }

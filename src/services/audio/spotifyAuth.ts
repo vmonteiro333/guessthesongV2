@@ -23,8 +23,7 @@ function base64UrlEncode(bytes: Uint8Array): string {
 }
 
 function randomString(length: number): string {
-  const chars =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
   const values = crypto.getRandomValues(new Uint8Array(length));
   let out = "";
   for (const value of values) out += chars[value % chars.length];
@@ -89,8 +88,24 @@ export async function startLogin(): Promise<void> {
   window.location.assign(url.toString());
 }
 
-/** Se a página voltou do login (?code=...), troca o código por tokens. */
-export async function handleAuthRedirect(): Promise<boolean> {
+/**
+ * SINGLETON: o código de autorização é de USO ÚNICO. O React StrictMode (dev)
+ * monta o hook duas vezes; sem este guard, duas chamadas trocavam o mesmo
+ * código e uma falhava. Aqui a troca acontece exatamente uma vez por página.
+ */
+let authRedirectPromise: Promise<boolean> | null = null;
+
+export function handleAuthRedirect(): Promise<boolean> {
+  if (!authRedirectPromise) {
+    authRedirectPromise = doHandleAuthRedirect().catch((error) => {
+      authRedirectPromise = null; // falhou: permite nova tentativa de login
+      throw error;
+    });
+  }
+  return authRedirectPromise;
+}
+
+async function doHandleAuthRedirect(): Promise<boolean> {
   const params = new URLSearchParams(window.location.search);
   const code = params.get("code");
   const state = params.get("state");
