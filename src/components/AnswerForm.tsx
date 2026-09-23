@@ -1,12 +1,9 @@
 import { useEffect, useRef } from "react";
 import { SkipIcon } from "./icons";
 
-type AnswerField = "artist" | "title";
-
 interface AnswerFormProps {
-  artist: string;
   title: string;
-  onChange: (field: AnswerField, value: string) => void;
+  onChange: (value: string) => void;
   onSubmit: () => void;
   onSkip: () => void;
   canType: boolean;
@@ -16,7 +13,6 @@ interface AnswerFormProps {
 }
 
 export default function AnswerForm({
-  artist,
   title,
   onChange,
   onSubmit,
@@ -27,15 +23,13 @@ export default function AnswerForm({
   isLastStage,
 }: AnswerFormProps) {
   const titleRef = useRef<HTMLInputElement>(null);
-  const artistRef = useRef<HTMLInputElement>(null);
   const hasSong = title.trim().length > 0;
 
   useEffect(() => {
     if (!canAnswer) return;
     if (typeof window === "undefined" || !window.matchMedia("(hover: hover)").matches) return;
-    if (!title.trim()) titleRef.current?.focus();
-    else if (!artist.trim()) artistRef.current?.focus();
-  }, [canAnswer, title, artist]);
+    titleRef.current?.focus();
+  }, [canAnswer]);
 
   return (
     <form
@@ -60,32 +54,13 @@ export default function AnswerForm({
           autoComplete="off"
           spellCheck={false}
           disabled={!canType}
-          aria-describedby="answer-help"
-          onChange={(event) => onChange("title", event.target.value)}
+          onChange={(event) => onChange(event.target.value)}
         />
       </div>
 
-      <div className="field">
-        <label htmlFor="answer-artist">Artista da sua tentativa</label>
-        <input
-          ref={artistRef}
-          id="answer-artist"
-          name="artist"
-          type="text"
-          value={artist}
-          placeholder="Quem canta a música que você chutou? (opcional)"
-          autoComplete="off"
-          spellCheck={false}
-          disabled={!canType}
-          aria-describedby="answer-help"
-          onChange={(event) => onChange("artist", event.target.value)}
-        />
-      </div>
-
-      <p className="hint" id="answer-help">
-        O palpite é sempre uma <strong>música</strong> — só o artista não vale. Se a música
-        chutada for de um artista que participa da música secreta, você ganha a dica amarela.{" "}
-        <kbd>Enter</kbd> envia.
+      <p className="hint">
+        O palpite é sempre uma <strong>música</strong>. Chutou uma música de um artista que
+        participa da secreta? Você recebe a dica amarela. <kbd>Enter</kbd> envia.
       </p>
 
       <div className="actions">

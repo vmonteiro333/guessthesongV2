@@ -1,108 +1,121 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SpotifyPlayer } from "../services/audio/SpotifyPlayer";
-import { isSpotifyTrackUrl } from "../utils/spotifyUrl";
+import { SpotifyWebPlayer } from "../services/audio/SpotifyWebPlayer";
+import {
+  handleAuthRedirect,
+  isNotLoggedInError,
+  loadTokens,
+  startLogin,
+} from "../services/audio/spotifyAuth";
 
-export type PlayerServiceStatus = "waiting_player" | "initializing" | "ready" | "error";
+export type PlayerServiceStatus = "boot" | "needs_login" | "connecting" | "ready" | "error";
 export type SnippetResult = "completed" | "stopped";
 
 const POLL_INTERVAL_MS = 50;
 const HARD_ELAPSED_SLACK_MS = 2_000;
 const ABSOLUTE_FAILSAFE_MS = 5_000;
+const PLAYBACK_START_TIMEOUT_MS = 10_000;
 
 export interface UseAudioResult {
-  attachContainer: (element: HTMLDivElement | null) => void;
   serviceStatus: PlayerServiceStatus;
   serviceError: string | null;
+  login: () => void;
   loadTrack: (url: string) => Promise<void>;
   playSnippet: (limitSeconds: number) => Promise<SnippetResult>;
   stopPlayback: () => void;
 }
 
 /**
- * Controla TODO o áudio do jogo via Spotify embed. Nenhuma chamada à IFrame
- * API sai daqui. Token de sessão invalida monitoramentos antigos; apenas
- * uma reprodução e um monitoramento existem por vez.
+ * Sessão de áudio do jogo via Web Playback SDK (áudio completo, Premium).
+ * Fluxo de boot: processa retorno do login → tem tokens? → conecta device.
  */
 export function useAudio(): UseAudioResult {
-  const [container, setContainer] = useState<HTMLDivElement | null>(null);
-  const [serviceStatus, setServiceStatus] = useState<PlayerServiceStatus>("waiting_player");
+  const [serviceStatus, setServiceStatus] = useState<PlayerServiceStatus>("boot");
   const [serviceError, setServiceError] = useState<string | null>(null);
-
-  const playerRef = useRef<SpotifyPlayer | null>(null);
+  const playerRef = useRef<SpotifyWebPlayer | null>(null);
   const sessionRef = useRef(0);
 
-  const attachContainer = useCallback((element: HTMLDivElement | null) => {
-    setContainer(element);
-  }, []);
-
-  // Cria o player UMA vez por container; limpa tudo na desmontagem.
   useEffect(() => {
-    if (!container) return;
-    const player = new SpotifyPlayer(container);
-    playerRef.current = player;
-    setServiceStatus("initializing");
-    setServiceError(null);
-
     let cancelled = false;
-    let settled = false;
-    player
-      .init()
-      .then(() => {
-        if (cancelled || settled) return;
-        settled = true;
+    const player = new SpotifyWebPlayer();
+    playerRef.current = player;
+    const unsubscribeFatal = player.onError((message) => {
+      setServiceError(message);
+    });
+
+    (async () => {
+      setServiceStatus("connecting");
+      try {
+        await handleAuthRedirect();
+      } catch (error) {
+        if (cancelled) return;
+        setServiceStatus("needs_login");
+        setServiceError(error instanceof Error ? error.message : "Falha no login do Spotify.");
+        return;
+      }
+      if (cancelled) return;
+      if (!loadTokens()) {
+        setServiceStatus("needs_login");
+        return;
+      }
+      try {
+        await player.init();
+        if (cancelled) return;
         setServiceStatus("ready");
-      })
-      .catch((error: unknown) => {
-        if (cancelled || settled) return;
-        settled = true;
-        setServiceStatus("error");
-        setServiceError(
-          error instanceof Error ? error.message : "Falha ao inicializar o player do Spotify."
-        );
-      });
+      } catch (error) {
+        if (cancelled) return;
+        if (isNotLoggedInError(error)) {
+          setServiceStatus("needs_login");
+        } else {
+          setServiceStatus("error");
+          setServiceError(
+            error instanceof Error ? error.message : "Falha ao conectar ao Spotify."
+          );
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;
+      unsubscribeFatal();
       sessionRef.current += 1;
       player.destroy();
       if (playerRef.current === player) playerRef.current = null;
     };
-  }, [container]);
+  }, []);
+
+  const login = useCallback(() => {
+    void startLogin();
+  }, []);
 
   const loadTrack = useCallback(async (url: string): Promise<void> => {
     const player = playerRef.current;
-    if (!player) throw new Error("O player do Spotify ainda não foi montado na página.");
-    if (!isSpotifyTrackUrl(url)) {
-      throw new Error("URL do Spotify inválida (use o link open.spotify.com/track/...).");
-    }
+    if (!player) throw new Error("O player do Spotify ainda não está pronto.");
     sessionRef.current += 1; // interrompe qualquer snippet em curso
-    try {
-      player.pause();
-    } catch {
-      /* noop */
-    }
     await player.load(url);
   }, []);
 
   /**
-   * Toca o trecho DO INÍCIO e interrompe no limite do estágio.
-   * Monitoramento triplo (playback_update + polling + redes de segurança de
-   * relógio). Não prometemos precisão de milissegundos: iframe remoto.
+   * Toca a música DO ZERO (comando de play com position_ms=0) e corta no
+   * limite do estágio. O corte usa a posição interpolada localmente — muito
+   * mais precisa que o iframe — com redes de segurança de relógio.
    */
   const playSnippet = useCallback(async (limitSeconds: number): Promise<SnippetResult> => {
     const player = playerRef.current;
-    if (!player) throw new Error("Nenhuma música carregada para reproduzir.");
+    if (!player) throw new Error("O player do Spotify ainda não está pronto.");
 
     const session = ++sessionRef.current;
     const limitMs = Math.max(50, Math.round(limitSeconds * 1000));
 
     await player.playFromStart();
     if (session !== sessionRef.current) {
-      try {
-        player.pause();
-      } catch {
-        /* noop */
-      }
+      player.pause();
+      return "stopped";
+    }
+
+    // Espera o Connect começar a tocar de fato (buffering), sem travar.
+    await player.waitForPlaybackStart(PLAYBACK_START_TIMEOUT_MS);
+    if (session !== sessionRef.current) {
+      player.pause();
       return "stopped";
     }
 
@@ -120,13 +133,7 @@ export function useAudio(): UseAudioResult {
         window.clearTimeout(failsafeTimer);
         unsubscribeProgress();
         unsubscribeFinish();
-        if (result === "completed") {
-          try {
-            player.pause();
-          } catch {
-            /* noop */
-          }
-        }
+        if (result === "completed") player.pause();
         resolve(result);
       };
 
@@ -149,12 +156,7 @@ export function useAudio(): UseAudioResult {
           finish("completed");
           return;
         }
-        player
-          .getPosition()
-          .then(check)
-          .catch(() => {
-            /* tenta de novo no próximo tick */
-          });
+        void player.getPosition().then(check).catch(() => {});
       }, POLL_INTERVAL_MS);
 
       failsafeTimer = window.setTimeout(() => finish("completed"), limitMs + ABSOLUTE_FAILSAFE_MS);
@@ -163,21 +165,8 @@ export function useAudio(): UseAudioResult {
 
   const stopPlayback = useCallback((): void => {
     sessionRef.current += 1;
-    const player = playerRef.current;
-    if (!player) return;
-    try {
-      player.pause();
-    } catch {
-      /* noop */
-    }
+    playerRef.current?.pause();
   }, []);
 
-  return {
-    attachContainer,
-    serviceStatus,
-    serviceError,
-    loadTrack,
-    playSnippet,
-    stopPlayback,
-  };
+  return { serviceStatus, serviceError, login, loadTrack, playSnippet, stopPlayback };
 }

@@ -44,13 +44,13 @@ export interface UseGameResult {
   listen: () => void;
   skip: () => void;
   submitAnswer: () => void;
-  setAnswerField: (field: "artist" | "title", value: string) => void;
+  setAnswerField: (value: string) => void;
   nextSong: () => void;
 }
 
 /**
- * Estado central do jogo. Não executa NENHUMA chamada direta ao widget:
- * toda a reprodução passa por useSoundCloud.
+ * Estado central do jogo. Não executa NENHUMA chamada direta às APIs de
+ * áudio: toda a reprodução passa por useAudio.
  */
 export function useGame(audio: UseAudioResult): UseGameResult {
   const [gameStatus, setGameStatus] = useState<GameStatus>("idle");
@@ -85,7 +85,6 @@ export function useGame(audio: UseAudioResult): UseGameResult {
     }
   }, []);
 
-  // Cleanup final (sem memory leaks de timer).
   useEffect(() => {
     return () => {
       if (advanceTimerRef.current !== 0) window.clearTimeout(advanceTimerRef.current);
@@ -294,22 +293,21 @@ export function useGame(audio: UseAudioResult): UseGameResult {
   const skip = useCallback(() => {
     const status = gameStatus;
     if (status !== "ready" && status !== "waiting_answer" && status !== "playing") return;
-    if (skipLockRef.current) return; // sem SKIPs concorrentes/duplo clique
+    if (skipLockRef.current) return; // sem SKIPs concorrentes
     skipLockRef.current = true;
     window.setTimeout(() => {
       skipLockRef.current = false;
     }, 300);
 
-    audio.stopPlayback();      // interrompe reprodução e monitoramento
-    playTokenRef.current += 1; // invalida conclusões pendentes de listen()
+    audio.stopPlayback();
+    playTokenRef.current += 1;
 
     if (isLastStage(stageIndex)) {
-      // Último estágio: SKIP = "não sei" → encerra a rodada (nada de índice inválido).
+      // Último estágio: SKIP = "não sei" → encerra a rodada.
       finalizeRound(false);
       return;
     }
 
-    // Avança exatamente UM estágio; o próximo OUVIR já recomeça do 0.
     setStageIndex((prev) => Math.min(prev + 1, STAGES.length - 1));
     setAnswer({ artist: "", title: "" });
     setFeedback(null);
@@ -321,25 +319,13 @@ export function useGame(audio: UseAudioResult): UseGameResult {
     const song = currentSong;
     if (!song) return;
 
-    const guessTitle = answer.title;
-    const guessArtist = answer.artist;
-
-    // REGRA: o palpite é sempre uma música. Só o artista não é aceito.
-    if (normalizeText(guessTitle) === "") {
-      setFeedback({
-        kind: "invalid",
-        message: guessArtist.trim()
-          ? "Só o artista não vale: digite o nome da MÚSICA que você acha que é."
-          : "Digite o nome da música antes de tentar.",
-      });
+    // REGRA: o palpite é sempre uma música.
+    if (normalizeText(answer.title) === "") {
+      setFeedback({ kind: "invalid", message: "Digite o nome da música antes de tentar." });
       return;
     }
 
-    const evaluation = evaluateGuess(
-      { title: guessTitle, artist: guessArtist },
-      song,
-      catalog
-    );
+    const evaluation = evaluateGuess({ title: answer.title }, song, catalog);
 
     if (evaluation.outcome === "correct") {
       finalizeRound(true);
@@ -373,11 +359,11 @@ export function useGame(audio: UseAudioResult): UseGameResult {
     setFeedback({ kind: "wrong", message: "Não é essa. Ouça novamente ou avance o trecho." });
   }, [gameStatus, currentSong, answer, stageIndex, finalizeRound, upsertHistory]);
 
-  const setAnswerField = useCallback((field: "artist" | "title", value: string) => {
-    setAnswer((prev) => ({ ...prev, [field]: value }));
+  const setAnswerField = useCallback((value: string) => {
+    setAnswer((prev) => ({ ...prev, title: value }));
   }, []);
 
-  // Recorde pessoal em localStorage (opcional, best-effort).
+  // Recorde pessoal em localStorage (best-effort).
   useEffect(() => {
     if (gameStatus !== "game_over") return;
     if (score > loadBestScore()) saveBestScore(score);

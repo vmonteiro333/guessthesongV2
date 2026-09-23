@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { UseGameResult, GuessFeedback } from "../hooks/useGame";
 import type { UseAudioResult } from "../hooks/useAudio";
 import StageIndicator from "./StageIndicator";
-import SpotifyEmbed from "./SpotifyEmbed";
+import NowPlayingPanel from "./NowPlayingPanel";
 import AnswerForm from "./AnswerForm";
 import LoadingState from "./LoadingState";
 import ResultList from "./ResultList";
@@ -39,13 +39,15 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
         </div>
       )}
 
-      <SpotifyEmbed blurred={!roundOver} attachContainer={audio.attachContainer} />
-
-      {gameStatus === "loading" && <LoadingState message="Carregando a música…" />}
-      {gameStatus === "error" && <LoadingState message="Pulando para a próxima música…" />}
-
-      <FeedbackPanel feedback={feedback} />
-
+            <NowPlayingPanel
+        secret={!roundOver}
+        playing={gameStatus === "playing"}
+        song={
+          roundOver && game.currentSong
+            ? { title: game.currentSong.title, artist: game.currentSong.artist }
+            : null
+        }
+      />
       {canType && !serviceFatal && (
         <>
           <div className="listen-row">
@@ -71,7 +73,6 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
           </div>
 
           <AnswerForm
-            artist={game.answer.artist}
             title={game.answer.title}
             onChange={game.setAnswerField}
             onSubmit={game.submitAnswer}
