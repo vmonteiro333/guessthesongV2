@@ -11,9 +11,9 @@ export type PlayerServiceStatus = "boot" | "needs_login" | "connecting" | "ready
 export type SnippetResult = "completed" | "stopped";
 
 const POLL_INTERVAL_MS = 50;
-const HARD_ELAPSED_SLACK_MS = 2_000;
-const ABSOLUTE_FAILSAFE_MS = 5_000;
-const PLAYBACK_EVIDENCE_TIMEOUT_MS = 8_000;
+const EVIDENCE_GRACE_MS = 1_500;
+const PLAYBACK_EVIDENCE_TIMEOUT_MS = 15_000;
+const ENFORCE_STOP_MS = 15_000;
 
 export interface UseAudioResult {
   serviceStatus: PlayerServiceStatus;
@@ -81,45 +81,51 @@ export function useAudio(): UseAudioResult {
     void startLogin();
   }, []);
 
-  /** Carrega a faixa da rodada e PRÉ-BUFFERIZA (priming) em volume mudo. */
   const loadTrack = useCallback(async (url: string): Promise<void> => {
     const player = getSpotifyWebPlayer();
     sessionRef.current += 1;
     await player.load(url);
-    try {
-      await player.prime();
-    } catch {
-      /* sem priming: o buffer acontece no primeiro play */
-    }
   }, []);
 
   /**
-   * Toca a música DO ZERO e corta no limite do estágio. O corte monitora
-   * desde já e usa a posição real do áudio; com o priming, a evidência chega
-   * rápido e o corte fica preciso até no primeiro play.
+   * Toca do zero e corta no limite da etapa. O cronômetro conta só TEMPO DE
+   * ÁUDIO (começa na evidência de posição avançando), então o pause sempre
+   * cai com som fluindo e é honrado. Failsafe curto cobre travadas do polling.
    */
   const playSnippet = useCallback(async (limitSeconds: number): Promise<SnippetResult> => {
     const player = getSpotifyWebPlayer();
 
     const session = ++sessionRef.current;
     const limitMs = Math.max(50, Math.round(limitSeconds * 1000));
+    const mySession = session;
+
+    const safeStop = (): void => {
+      player.pause();
+      void player.enforceStop(ENFORCE_STOP_MS, () => sessionRef.current !== mySession);
+    };
 
     await player.playFromStart();
     if (session !== sessionRef.current) {
-      player.pause();
+      safeStop();
       return "stopped";
     }
 
-    await player.waitForPlaybackEvidence(PLAYBACK_EVIDENCE_TIMEOUT_MS);
+    let audioZeroAt: number;
+    try {
+      audioZeroAt = await player.waitForPlaybackEvidence(PLAYBACK_EVIDENCE_TIMEOUT_MS);
+    } catch (error) {
+      if (session !== sessionRef.current) return "stopped";
+      safeStop();
+      throw error;
+    }
     if (session !== sessionRef.current) {
-      player.pause();
+      safeStop();
       return "stopped";
     }
 
     return new Promise<SnippetResult>((resolve) => {
       let settled = false;
       let pollTimer = 0;
-      let slackTimer = 0;
       let failsafeTimer = 0;
       let unsubscribeFinish: () => void = () => {};
 
@@ -127,39 +133,34 @@ export function useAudio(): UseAudioResult {
         if (settled) return;
         settled = true;
         window.clearInterval(pollTimer);
-        window.clearTimeout(slackTimer);
         window.clearTimeout(failsafeTimer);
         unsubscribeFinish();
-        if (result === "completed") {
-          player.pause();
-          const mySession = sessionRef.current;
-          void player.enforceStop(4_000, () => sessionRef.current !== mySession);
-        }
+        if (result === "completed") safeStop();
         resolve(result);
       };
 
-      // O corte usa a posição real/interpolada — se o áudio já passou do
-      // limite quando a evidência chega, corta no primeiro tick.
+      const check = (position: number) => {
+        if (settled) return;
+        if (session !== sessionRef.current) {
+          finish("stopped");
+          return;
+        }
+        if (position >= limitMs) finish("completed");
+      };
+
       pollTimer = window.setInterval(() => {
         if (settled) return;
-        void player
-          .getPosition()
-          .then((position) => {
-            if (settled) return;
-            if (session !== sessionRef.current) {
-              finish("stopped");
-              return;
-            }
-            if (position >= limitMs) finish("completed");
-          })
-          .catch(() => {});
+        void player.getPosition().then(check).catch(() => {});
       }, POLL_INTERVAL_MS);
 
       unsubscribeFinish = player.onFinish(() => finish("completed"));
 
-      // Redes de segurança finais (contadas desde já, generosas de propósito).
-      slackTimer = window.setTimeout(() => finish("completed"), limitMs + HARD_ELAPSED_SLACK_MS);
-      failsafeTimer = window.setTimeout(() => finish("completed"), limitMs + ABSOLUTE_FAILSAFE_MS);
+      // Failsafe: âncora + limite + folga curta (o corte normal é por posição;
+      // este só cobre travadas do relógio de posição).
+      failsafeTimer = window.setTimeout(
+        () => finish("completed"),
+        Math.max(0, audioZeroAt + limitMs + EVIDENCE_GRACE_MS - performance.now())
+      );
     });
   }, []);
 
@@ -168,7 +169,7 @@ export function useAudio(): UseAudioResult {
     const player = getSpotifyWebPlayer();
     const mySession = sessionRef.current;
     player.pause();
-    void player.enforceStop(4_000, () => sessionRef.current !== mySession);
+    void player.enforceStop(ENFORCE_STOP_MS, () => sessionRef.current !== mySession);
   }, []);
 
   return { serviceStatus, serviceError, login, loadTrack, playSnippet, stopPlayback };
