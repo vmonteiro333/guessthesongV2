@@ -332,39 +332,42 @@ export class SpotifyWebPlayer implements AudioPlayer {
     return { ok: false };
   }
 
-  /**
-   * Espera EVIDÊNCIA de áudio fluindo via polling da Web API: progresso
-   * AVANÇANDO entre amostras (progress congelado em 0 = buffering, ignora).
-   * Retorna a âncora do "zero" do áudio (performance.now correspondente).
+    /**
+   * Espera EVIDÊNCIA de áudio real: UMA amostra com progresso > 0 (buffering
+   * reporta pos=0; qualquer pos>0 significa áudio já passado daquele ponto).
+   * maxReasonablePos descarta amostras "vivas" de um playback anterior.
+   * Retorna a âncora do zero do áudio.
    */
-  async waitForPlaybackEvidence(
-    timeoutMs: number,
-    isCancelled?: () => boolean
-  ): Promise<number> {
-    const start = performance.now();
-    let last: { pos: number; at: number } | null = null;
-    for (;;) {
-      if (this.destroyed) throw new Error("O player foi encerrado.");
-      if (isCancelled?.()) throw new Error("cancelled");
-      const poll = await this.fetchWebPlaybackState();
-      const now = performance.now();
-      if (poll.ok && poll.snapshot && poll.snapshot.isPlaying && poll.snapshot.progressMs !== null) {
-        const pos = poll.snapshot.progressMs;
-        const advanced = last !== null && pos > last.pos && now - last.at >= 150;
-        if (advanced) {
-          this.positionMs = pos;
-          this.snapshotAt = now;
-          this.paused = false;
-          return now - pos;
+    async waitForPlaybackEvidence(
+      timeoutMs: number,
+      maxReasonablePos: number,
+      isCancelled?: () => boolean
+    ): Promise<number> {
+      const start = performance.now();
+      for (;;) {
+        if (this.destroyed) throw new Error("O player foi encerrado.");
+        if (isCancelled?.()) throw new Error("cancelled");
+        const poll = await this.fetchWebPlaybackState();
+        if (
+          poll.ok &&
+          poll.snapshot &&
+          poll.snapshot.isPlaying &&
+          poll.snapshot.progressMs !== null
+        ) {
+          const pos = poll.snapshot.progressMs;
+          if (pos > 0 && pos <= maxReasonablePos) {
+            this.positionMs = pos;
+            this.snapshotAt = performance.now();
+            this.paused = false;
+            return performance.now() - pos;
+          }
         }
-        last = { pos, at: now };
+        if (performance.now() - start >= timeoutMs) {
+          throw new Error("O Spotify não começou a tocar a tempo. Tente ouvir novamente.");
+        }
+        await new Promise((r) => setTimeout(r, 200));
       }
-      if (now - start >= timeoutMs) {
-        throw new Error("O Spotify não começou a tocar a tempo. Tente ouvir novamente.");
-      }
-      await new Promise((r) => setTimeout(r, 250));
     }
-  }
 
   /**
    * GARANTIDOR de parada via Web API: envia pause, confere o estado e repete
@@ -375,6 +378,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
     const cancelled = (): boolean => this.stopEpoch !== myEpoch || (isCancelled?.() ?? false);
     const deadline = performance.now() + maxMs;
     let lastPauseAt = 0;
+    let nullCount = 0;
     try {
       this.player?.pause();
     } catch {
@@ -392,10 +396,43 @@ export class SpotifyWebPlayer implements AudioPlayer {
       }
       const poll = await this.fetchWebPlaybackState();
       if (cancelled()) return;
-      if (poll.ok && (poll.snapshot === null || !poll.snapshot.isPlaying)) return;
+      if (poll.ok) {
+        if (poll.snapshot && !poll.snapshot.isPlaying) return; // confirmado
+        if (poll.snapshot === null) {
+          nullCount += 1;
+          if (nullCount >= 2) return; // 2x "nada tocando": aceita
+        } else {
+          nullCount = 0;
+        }
+      }
       await new Promise((r) => setTimeout(r, 300));
     }
   }
+    /** Corte imediato: pause local + Web API em paralelo. */
+    stopNow(): void {
+      try {
+        this.player?.pause();
+      } catch {
+        /* noop */
+      }
+      void this.sendPauseCommand().catch(() => {});
+    }
+  
+    /** Reativa este device no Connect (corrige device "zumbi"/travado). */
+    async refreshDevice(): Promise<boolean> {
+      if (!this.deviceId) return false;
+      try {
+        const token = await getValidAccessToken();
+        const res = await fetch("https://api.spotify.com/v1/me/player", {
+          method: "PUT",
+          headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+          body: JSON.stringify({ device_ids: [this.deviceId], play: false }),
+        });
+        return res.ok || res.status === 204;
+      } catch {
+        return false;
+      }
+    }
 
   play(): void {
     this.player?.resume().catch(() => {});
