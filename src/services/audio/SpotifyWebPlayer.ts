@@ -75,6 +75,9 @@ export interface WebPlaybackSnapshot {
   isPlaying: boolean;
   progressMs: number | null;
   durationMs: number;
+  coverUrl: string | null;
+  trackName: string | null;
+  artistName: string | null;
 }
 
 export type WebPollResult =
@@ -305,7 +308,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
           { headers: { Authorization: "Bearer " + token } }
         );
         if (res.status === 204) return { ok: true, snapshot: null };
-        if (res.status === 401) continue; // força refresh e tenta de novo
+        if (res.status === 401) continue;
         if (res.status === 429) {
           const wait = Number(res.headers.get("Retry-After") ?? "1");
           await new Promise((r) => setTimeout(r, Math.min(5, Math.max(1, wait)) * 1000));
@@ -315,13 +318,22 @@ export class SpotifyWebPlayer implements AudioPlayer {
         const data = (await res.json()) as {
           is_playing?: boolean;
           progress_ms?: number;
-          item?: { duration_ms?: number } | null;
+          item?: {
+            name?: string;
+            duration_ms?: number;
+            album?: { images?: { url: string }[] };
+            artists?: { name: string }[];
+          } | null;
         };
         if (!data.item) return { ok: true, snapshot: null };
         const snapshot: WebPlaybackSnapshot = {
           isPlaying: data.is_playing === true,
           progressMs: typeof data.progress_ms === "number" ? data.progress_ms : null,
           durationMs: typeof data.item.duration_ms === "number" ? data.item.duration_ms : 0,
+          coverUrl: data.item.album?.images?.[0]?.url ?? null,
+          trackName: data.item.name ?? null,
+          artistName:
+            data.item.artists?.map((a) => a.name).filter(Boolean).join(", ") || null,
         };
         if (snapshot.durationMs > 0) this.durationMs = snapshot.durationMs;
         return { ok: true, snapshot };

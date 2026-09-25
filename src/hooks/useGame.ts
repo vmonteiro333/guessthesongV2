@@ -40,6 +40,7 @@ export interface UseGameResult {
   score: number;
   history: SongRoundResult[];
   completedSongs: number;
+  listenSeq: number;
   startGame: () => void;
   listen: () => void;
   skip: () => void;
@@ -61,6 +62,7 @@ export function useGame(audio: UseAudioResult): UseGameResult {
   const [feedback, setFeedback] = useState<GuessFeedback | null>(null);
   const [score, setScore] = useState(0);
   const [history, setHistory] = useState<SongRoundResult[]>([]);
+  const [listenSeq, setListenSeq] = useState(0);
 
   /** Estado da rodada em andamento (artista descoberto antes do título). */
   const roundRef = useRef<{ artistCorrect: boolean; artistAtStage: number | null }>({
@@ -222,6 +224,7 @@ export function useGame(audio: UseAudioResult): UseGameResult {
     if (gameStatus !== "ready" && gameStatus !== "waiting_answer") return;
     const song = currentSong;
     if (!song) return;
+    setListenSeq((n) => n + 1);
     const token = ++playTokenRef.current;
     setFeedback(null);
     setGameStatus("playing");
@@ -370,6 +373,7 @@ export function useGame(audio: UseAudioResult): UseGameResult {
   }, [gameStatus, score]);
 
   return {
+    listenSeq,
     gameStatus,
     queue,
     currentSong,

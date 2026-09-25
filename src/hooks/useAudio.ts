@@ -9,18 +9,27 @@ import {
 
 export type PlayerServiceStatus = "boot" | "needs_login" | "connecting" | "ready" | "error";
 export type SnippetResult = "completed" | "stopped";
+export type SnippetPhase = "idle" | "buffering" | "playing";
+
+export interface TrackMeta {
+  coverUrl: string | null;
+  trackName: string | null;
+  artistName: string | null;
+}
 
 const EVIDENCE_TIMEOUT_MS = 12_000;
 const ENFORCE_STOP_MS = 12_000;
 const POLL_MS = 150;
 const POLL_FAST_MS = 90;
 const CLOCK_SAFETY_MS = 350;
-const PAUSE_LEAD_MS = 300;     // antecipação do pause (compensa latência do PUT)
-const HARD_CAP_EXTRA_MS = 700; // cap absoluto depois do limite
+const PAUSE_LEAD_MS = 300;
+const HARD_CAP_EXTRA_MS = 700;
 
 export interface UseAudioResult {
   serviceStatus: PlayerServiceStatus;
   serviceError: string | null;
+  snippetPhase: SnippetPhase;
+  trackMeta: TrackMeta | null;
   login: () => void;
   loadTrack: (url: string) => Promise<void>;
   playSnippet: (limitSeconds: number) => Promise<SnippetResult>;
@@ -34,6 +43,8 @@ export interface UseAudioResult {
 export function useAudio(): UseAudioResult {
   const [serviceStatus, setServiceStatus] = useState<PlayerServiceStatus>("boot");
   const [serviceError, setServiceError] = useState<string | null>(null);
+  const [snippetPhase, setSnippetPhase] = useState<SnippetPhase>("idle");
+  const [trackMeta, setTrackMeta] = useState<TrackMeta | null>(null);
   const sessionRef = useRef(0);
 
   useEffect(() => {
@@ -87,16 +98,19 @@ export function useAudio(): UseAudioResult {
   const loadTrack = useCallback(async (url: string): Promise<void> => {
     const player = getSpotifyWebPlayer();
     sessionRef.current += 1;
+    setTrackMeta(null); // capa antiga não vaza na rodada nova
+    setSnippetPhase("idle");
     await player.load(url);
   }, []);
 
   /**
    * Toca do zero e corta no limite da etapa. Estratégia:
    * 1. Evidência = 1 amostra com progresso > 0 (âncora do zero do áudio);
-   *    se o device travar, reativa-o (refreshDevice) e tenta 1x de novo.
+   *    device travado → refreshDevice + 1 retry automático.
    * 2. Pause AGENDADO em (âncora + limite − PAUSE_LEAD) — chega no tempo.
    * 3. Cap absoluto em (âncora + limite + 700ms) — mata qualquer "infinito".
    * 4. Polling como rede de segurança (posição + pausa vinda de fora).
+   * snippetPhase dirige a UI (buffering → playing → idle).
    */
   const playSnippet = useCallback(async (limitSeconds: number): Promise<SnippetResult> => {
     const player = getSpotifyWebPlayer();
@@ -105,8 +119,11 @@ export function useAudio(): UseAudioResult {
     const limitMs = Math.max(50, Math.round(limitSeconds * 1000));
     const cancelled = (): boolean => sessionRef.current !== mySession;
 
+    setSnippetPhase("buffering");
+
     await player.playFromStart();
     if (cancelled()) {
+      setSnippetPhase("idle");
       void player.enforceStop(ENFORCE_STOP_MS, cancelled);
       return "stopped";
     }
@@ -120,24 +137,29 @@ export function useAudio(): UseAudioResult {
           cancelled
         );
       } catch {
-        if (cancelled()) return "stopped";
+        if (cancelled()) {
+          setSnippetPhase("idle");
+          return "stopped";
+        }
         if (attempt === 0) {
-          // Device provavelmente "zumbi": reativa e joga de novo (1 retry).
           await player.refreshDevice();
           await player.playFromStart();
         }
       }
     }
     if (cancelled()) {
+      setSnippetPhase("idle");
       void player.enforceStop(ENFORCE_STOP_MS, cancelled);
       return "stopped";
     }
     if (anchor === null) {
       player.stopNow();
+      setSnippetPhase("idle");
       void player.enforceStop(ENFORCE_STOP_MS, cancelled);
       throw new Error("O Spotify não começou a tocar a tempo. Tente ouvir novamente.");
     }
     const audioZeroAt: number = anchor;
+    if (!cancelled()) setSnippetPhase("playing");
 
     return new Promise<SnippetResult>((resolve) => {
       let settled = false;
@@ -156,6 +178,7 @@ export function useAudio(): UseAudioResult {
         if (settled) return;
         settled = true;
         cleanup();
+        setSnippetPhase("idle");
         if (result === "completed") {
           player.stopNow();
           void player.enforceStop(ENFORCE_STOP_MS, cancelled);
@@ -186,20 +209,27 @@ export function useAudio(): UseAudioResult {
 
         if (st.ok && st.snapshot && st.snapshot.isPlaying && st.snapshot.progressMs !== null) {
           const pos = st.snapshot.progressMs;
-          // Failsafe por posição (rede atrasando o agendado).
           if (pos >= limitMs + CLOCK_SAFETY_MS) {
             finish("completed");
             return;
           }
         } else if (st.ok && (st.snapshot === null || !st.snapshot.isPlaying)) {
-          // Pausa vinda de fora = nosso stopNow agendado OU device morreu;
-          // nos dois casos o trecho acabou.
           finish("completed");
           return;
         }
 
+        // Meta para a UI (capa/artista) — só atualiza quando muda (sem spam de render).
+        if (st.ok && st.snapshot && st.snapshot.trackName) {
+          const snap = st.snapshot;
+          setTrackMeta((prev) =>
+            prev && prev.trackName === snap.trackName
+              ? prev
+              : { coverUrl: snap.coverUrl, trackName: snap.trackName, artistName: snap.artistName }
+          );
+        }
+
         if (!settled && now - startedAt >= EVIDENCE_TIMEOUT_MS + limitMs + 8_000) {
-          finish("completed"); // rede de segurança final do loop
+          finish("completed");
           return;
         }
 
@@ -213,11 +243,12 @@ export function useAudio(): UseAudioResult {
 
   const stopPlayback = useCallback((): void => {
     sessionRef.current += 1;
+    setSnippetPhase("idle");
     const player = getSpotifyWebPlayer();
     const mySession = sessionRef.current;
     player.stopNow();
     void player.enforceStop(ENFORCE_STOP_MS, () => sessionRef.current !== mySession);
   }, []);
 
-  return { serviceStatus, serviceError, login, loadTrack, playSnippet, stopPlayback };
+  return { serviceStatus, serviceError, snippetPhase, trackMeta, login, loadTrack, playSnippet, stopPlayback };
 }

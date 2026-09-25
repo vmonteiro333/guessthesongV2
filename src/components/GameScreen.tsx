@@ -3,6 +3,8 @@ import type { UseGameResult, GuessFeedback } from "../hooks/useGame";
 import type { UseAudioResult } from "../hooks/useAudio";
 import StageIndicator from "./StageIndicator";
 import NowPlayingPanel from "./NowPlayingPanel";
+import AlbumBackdrop from "./AlbumBackdrop";
+import ConfettiBurst from "./ConfettiBurst";
 import AnswerForm from "./AnswerForm";
 import LoadingState from "./LoadingState";
 import ResultList from "./ResultList";
@@ -24,10 +26,17 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
   const canListen = gameStatus === "ready" || gameStatus === "waiting_answer";
   const isLastRound = currentSongIndex + 1 >= queue.length;
   const serviceFatal = audio.serviceStatus === "error";
+  const animKey = `${game.currentSong?.id ?? "none"}-${game.stageIndex}-${game.listenSeq}`;
 
   return (
     <section className="game-screen" aria-label="Rodada atual">
-      <StageIndicator stageIndex={game.stageIndex} playing={gameStatus === "playing"} />
+      <AlbumBackdrop coverUrl={audio.trackMeta?.coverUrl ?? null} revealed={roundOver} />
+
+      <StageIndicator
+        stageIndex={game.stageIndex}
+        phase={audio.snippetPhase}
+        animKey={animKey}
+      />
 
       {serviceFatal && (
         <div className="alert" role="alert">
@@ -69,7 +78,11 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
               }
             >
               <PlayIcon />
-              {gameStatus === "playing" ? "Tocando…" : "Ouvir o trecho"}
+              {audio.snippetPhase === "buffering"
+                ? "Preparando áudio…"
+                : gameStatus === "playing"
+                  ? "Tocando…"
+                  : "Ouvir o trecho"}
             </button>
             <span className="listen-hint">
               {gameStatus === "playing"
@@ -105,7 +118,13 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
 function FeedbackPanel({ feedback }: { feedback: GuessFeedback | null }) {
   if (!feedback) return null;
   return (
-    <div className={`feedback feedback--${feedback.kind}`} role="status" aria-live="polite">
+    <div
+      key={`${feedback.kind}-${feedback.message}`}
+      className={`feedback feedback--${feedback.kind}`}
+      role="status"
+      aria-live="polite"
+    >
+      {feedback.kind === "correct" && <ConfettiBurst />}
       <p className="feedback-message">{feedback.message}</p>
       {feedback.detail && <p className="feedback-detail">{feedback.detail}</p>}
     </div>
