@@ -1,6 +1,9 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { useGame } from "./hooks/useGame";
 import { useAudio } from "./hooks/useAudio";
+import type { Playlist } from "./types/playlist";
+import { playlists } from "./data/playlists";
 import GameHeader from "./components/GameHeader";
 import GameScreen from "./components/GameScreen";
 import GameOver from "./components/GameOver";
@@ -8,14 +11,28 @@ import StartScreen from "./components/StartScreen";
 import EmptyState from "./components/EmptyState";
 import LoadingState from "./components/LoadingState";
 import SpotifyConnect from "./components/SpotifyConnect";
-import { songs as catalog } from "./data/songs";
+import PlaylistPicker from "./components/PlaylistPicker";
+import { loadSelectedPlaylistId, saveSelectedPlaylistId } from "./utils/storage";
+
+function findPlaylist(id: string | null): Playlist | null {
+  if (!id) return null;
+  return playlists.find((p) => p.id === id) ?? null;
+}
 
 export default function App() {
   const audio = useAudio();
-  const game = useGame(audio);
+  const [selected, setSelected] = useState<Playlist | null>(() =>
+    findPlaylist(loadSelectedPlaylistId())
+  );
+
+  const choosePlaylist = (playlist: Playlist): void => {
+    setSelected(playlist);
+    saveSelectedPlaylistId(playlist.id);
+  };
+  const backToPicker = (): void => setSelected(null);
 
   let screen: ReactNode;
-  if (catalog.length === 0) {
+  if (playlists.length === 0) {
     screen = <EmptyState />;
   } else if (audio.serviceStatus === "needs_login") {
     screen = <SpotifyConnect onConnect={audio.login} error={audio.serviceError} />;
@@ -35,24 +52,66 @@ export default function App() {
         </button>
       </section>
     );
-  } else if (game.gameStatus === "idle") {
-    screen = <StartScreen totalSongs={catalog.length} onStart={game.startGame} />;
-  } else if (game.gameStatus === "game_over") {
-    screen = <GameOver score={game.score} history={game.history} onRestart={game.startGame} />;
+  } else if (selected === null) {
+    screen = <PlaylistPicker playlists={playlists} onSelect={choosePlaylist} />;
+  } else {
+    // key por playlist: trocar remonta o jogo com estado fresco (idle).
+    screen = (
+      <Game
+        key={selected.id}
+        playlist={selected}
+        audio={audio}
+        onChoosePlaylist={backToPicker}
+      />
+    );
+  }
+
+  return (
+    <div className="app">
+      <main className="app-main">{screen}</main>
+    </div>
+  );
+}
+
+interface GameProps {
+  playlist: Playlist;
+  audio: ReturnType<typeof useAudio>;
+  onChoosePlaylist: () => void;
+}
+
+function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
+  const game = useGame(audio, playlist);
+  const { gameStatus } = game;
+
+  const showHeader = gameStatus !== "idle" && gameStatus !== "game_over";
+
+  let screen: ReactNode;
+  if (gameStatus === "idle") {
+    screen = (
+      <StartScreen
+        playlist={playlist}
+        onStart={game.startGame}
+        onChoosePlaylist={onChoosePlaylist}
+      />
+    );
+  } else if (gameStatus === "game_over") {
+    screen = (
+      <GameOver
+        score={game.score}
+        history={game.history}
+        onRestart={game.startGame}
+        onChoosePlaylist={onChoosePlaylist}
+      />
+    );
   } else {
     screen = <GameScreen game={game} audio={audio} />;
   }
 
-  const showHeader =
-    catalog.length > 0 &&
-    audio.serviceStatus === "ready" &&
-    game.gameStatus !== "idle" &&
-    game.gameStatus !== "game_over";
-
   return (
-    <div className="app">
+    <div className="game-root">
       {showHeader && (
         <GameHeader
+          playlistName={playlist.name}
           score={game.score}
           currentIndex={Math.min(game.currentSongIndex + 1, game.queue.length)}
           total={game.queue.length}

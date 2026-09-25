@@ -19,3 +19,22 @@ export function saveBestScore(score: number): void {
     /* localStorage indisponível: ignora silenciosamente */
   }
 }
+
+const PLAYLIST_KEY = "guessthesong:selected-playlist";
+
+/** Última playlist escolhida (best-effort). */
+export function loadSelectedPlaylistId(): string | null {
+  try {
+    return window.localStorage.getItem(PLAYLIST_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function saveSelectedPlaylistId(id: string): void {
+  try {
+    window.localStorage.setItem(PLAYLIST_KEY, id);
+  } catch {
+    /* noop */
+  }
+}

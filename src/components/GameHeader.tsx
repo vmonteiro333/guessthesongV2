@@ -4,9 +4,10 @@ interface GameHeaderProps {
   score: number;
   currentIndex: number;
   total: number;
+  playlistName: string;
 }
 
-export default function GameHeader({ score, currentIndex, total }: GameHeaderProps) {
+export default function GameHeader({ score, currentIndex, total, playlistName }: GameHeaderProps) {
   return (
     <header className="site-header">
       <div className="brand">
@@ -18,6 +19,9 @@ export default function GameHeader({ score, currentIndex, total }: GameHeaderPro
       <div className="header-meta">
         <span className="chip chip-score" aria-label={`Pontuação: ${score} pontos`}>
           {score} pts
+        </span>
+        <span className="chip chip-playlist" title={playlistName}>
+          {playlistName}
         </span>
         <span className="chip" aria-label={`Música ${currentIndex} de ${total}`}>
           Música {currentIndex}/{total}

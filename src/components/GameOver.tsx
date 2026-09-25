@@ -9,11 +9,11 @@ interface GameOverProps {
   score: number;
   history: SongRoundResult[];
   onRestart: () => void;
+  onChoosePlaylist: () => void;
 }
 
-export default function GameOver({ score, history, onRestart }: GameOverProps) {
+export default function GameOver({ score, history, onRestart, onChoosePlaylist }: GameOverProps) {
   const stats = useMemo(() => computeGameStats(history), [history]);
-  // Lido uma vez na montagem (antes do efeito do hook gravar o novo recorde).
   const previousBest = useMemo(() => loadBestScore(), []);
   const isRecord = score > previousBest && score > 0;
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -65,7 +65,10 @@ export default function GameOver({ score, history, onRestart }: GameOverProps) {
 
       {stats.bestRound ? (
         <p className="gameover-best-round">
-          Melhor rodada: <strong>{stats.bestRound.artist} — {stats.bestRound.title}</strong>{" "}
+          Melhor rodada:{" "}
+          <strong>
+            {stats.bestRound.artist} — {stats.bestRound.title}
+          </strong>{" "}
           ({stats.bestRound.points} pts em{" "}
           {formatSeconds(STAGES[stats.bestRound.solvedAtStage ?? 0])})
         </p>
@@ -73,15 +76,15 @@ export default function GameOver({ score, history, onRestart }: GameOverProps) {
         <p className="gameover-best-round">Nenhuma rodada acertada nesta sessão.</p>
       )}
 
-      <button
-        ref={buttonRef}
-        type="button"
-        className="btn btn-primary btn-large"
-        onClick={onRestart}
-      >
-        <RestartIcon />
-        Jogar novamente
-      </button>
+      <div className="gameover-actions">
+        <button ref={buttonRef} type="button" className="btn btn-primary btn-large" onClick={onRestart}>
+          <RestartIcon />
+          Jogar novamente
+        </button>
+        <button type="button" className="btn btn-ghost btn-large" onClick={onChoosePlaylist}>
+          Trocar playlist
+        </button>
+      </div>
     </section>
   );
 }

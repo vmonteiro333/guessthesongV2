@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { songs as catalog } from "../data/songs";
+import type { Playlist } from "../types/playlist";
 import type { Song } from "../types/song";
 import type { GameStatus, SongRoundResult } from "../types/game";
 import { getStageSeconds, isLastStage, STAGES } from "../utils/gameRules";
@@ -53,7 +53,7 @@ export interface UseGameResult {
  * Estado central do jogo. Não executa NENHUMA chamada direta às APIs de
  * áudio: toda a reprodução passa por useAudio.
  */
-export function useGame(audio: UseAudioResult): UseGameResult {
+export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResult {
   const [gameStatus, setGameStatus] = useState<GameStatus>("idle");
   const [queue, setQueue] = useState<Song[]>([]);
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
@@ -88,7 +88,7 @@ export function useGame(audio: UseAudioResult): UseGameResult {
   }, []);
 
   useEffect(() => {
-    return () => {
+    return () => {        
       if (advanceTimerRef.current !== 0) window.clearTimeout(advanceTimerRef.current);
     };
   }, []);
@@ -198,12 +198,12 @@ export function useGame(audio: UseAudioResult): UseGameResult {
   }, [goToNextSong]);
 
   const startGame = useCallback(() => {
-    if (catalog.length === 0) return;
+    if (playlist.songs.length === 0) return;                    // ← mudou (era catalog.length)
     if (gameStatus !== "idle" && gameStatus !== "game_over") return;
     clearAdvanceTimer();
     audio.stopPlayback();
 
-    const shuffled = shuffle(catalog); // cópia; original intacto; sem repetições
+    const shuffled = shuffle(playlist.songs);                   // ← mudou (era shuffle(catalog))
     roundRef.current = { artistCorrect: false, artistAtStage: null };
     playTokenRef.current += 1;
     setQueue(shuffled);
@@ -217,7 +217,7 @@ export function useGame(audio: UseAudioResult): UseGameResult {
     const token = loadSeqRef.current;
     setGameStatus("loading");
     void loadCurrentSong(shuffled[0], token);
-  }, [gameStatus, audio, clearAdvanceTimer, loadCurrentSong]);
+  }, [gameStatus, audio, clearAdvanceTimer, loadCurrentSong, playlist]);  // ← mudou (adicionou playlist)
 
   /** OUVIR: toca do início e para no limite do estágio atual. */
   const listen = useCallback(async () => {
@@ -328,7 +328,7 @@ export function useGame(audio: UseAudioResult): UseGameResult {
       return;
     }
 
-    const evaluation = evaluateGuess({ title: answer.title }, song, catalog);
+    const evaluation = evaluateGuess({ title: answer.title }, song, playlist.songs);
 
     if (evaluation.outcome === "correct") {
       finalizeRound(true);
@@ -360,7 +360,7 @@ export function useGame(audio: UseAudioResult): UseGameResult {
     }
 
     setFeedback({ kind: "wrong", message: "Não é essa. Ouça novamente ou avance o trecho." });
-  }, [gameStatus, currentSong, answer, stageIndex, finalizeRound, upsertHistory]);
+  }, [gameStatus, currentSong, answer, stageIndex, finalizeRound, upsertHistory, playlist]);
 
   const setAnswerField = useCallback((value: string) => {
     setAnswer((prev) => ({ ...prev, title: value }));
@@ -393,4 +393,4 @@ export function useGame(audio: UseAudioResult): UseGameResult {
     setAnswerField,
     nextSong: goToNextSong,
   };
-}
+}   

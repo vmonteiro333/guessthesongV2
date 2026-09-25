@@ -1,15 +1,20 @@
-// scripts/convert-csv.mjs — v2 (aceita CSV do Exportify em inglês OU português)
-// Uso: node scripts/convert-csv.mjs playlist.csv
+// scripts/convert-csv.mjs — v3 (playlists nomeadas)
+// Uso: node scripts/convert-csv.mjs playlist.csv "Nome da Playlist"
+// Escreve src/data/playlists/<slug>.ts e regenera o index.ts.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
+const playlistsDir = resolve(root, "src/data/playlists");
+
 const csvPath = process.argv[2] ?? "";
+const displayName = (process.argv[3] ?? "").trim();
+
 if (!csvPath) {
-  console.error("Uso: node scripts/convert-csv.mjs playlist.csv");
+  console.error('Uso: node scripts/convert-csv.mjs playlist.csv "Nome da Playlist"');
   process.exit(1);
 }
 
@@ -52,6 +57,49 @@ function parseCsv(text) {
   return rows;
 }
 
+function slugify(text) {
+  return (
+    text
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "playlist"
+  );
+}
+
+function importName(slug) {
+  return "playlist_" + slug.replace(/[^a-z0-9]/g, "_");
+}
+
+function writeIndex() {
+  const entries = [];
+  for (const f of readdirSync(playlistsDir)) {
+    if (!f.endsWith(".ts") || f === "index.ts") continue;
+    const slug = f.replace(/\.ts$/, "");
+    const content = readFileSync(resolve(playlistsDir, f), "utf8");
+    const m = content.match(/name:\s*"((?:[^"\\]|\\.)*)"/);
+    entries.push({ slug, name: m ? m[1] : "Playlist " + slug });
+  }
+  entries.sort((a, b) => a.slug.localeCompare(b.slug));
+  const lines = [
+    'import type { Playlist } from "../../types/playlist";',
+    "",
+    "// GERADO AUTOMATICAMENTE pelos scripts de importação — evite editar à mão.",
+    "",
+  ];
+  for (const e of entries) {
+    lines.push(`import { playlist as ${importName(e.slug)} } from "./${e.slug}";`);
+  }
+  lines.push("");
+  lines.push("export const playlists: Playlist[] = [");
+  for (const e of entries) lines.push(`  ${importName(e.slug)},`);
+  lines.push("];");
+  lines.push("");
+  writeFileSync(resolve(playlistsDir, "index.ts"), lines.join("\n"), "utf8");
+  return entries.length;
+}
+
 const raw = readFileSync(resolve(root, csvPath), "utf8").replace(/^\uFEFF/, "");
 const rows = parseCsv(raw);
 if (rows.length < 2) {
@@ -68,7 +116,6 @@ const colIndex = (...names) => {
   return -1;
 };
 
-// Colunas em inglês OU português, conforme o idioma do Exportify
 const idCol = colIndex("Spotify ID", "Track ID");
 const uriCol = colIndex("Track URI", "URI da faixa");
 const titleCol = colIndex("Track Name", "Nome da faixa");
@@ -80,7 +127,6 @@ if (titleCol === -1 || artistCol === -1 || (idCol === -1 && uriCol === -1)) {
   process.exit(1);
 }
 
-/** Extrai o ID de 22 caracteres do ID puro ou do URI "spotify:track:ID". */
 function extractTrackId(value) {
   const trimmed = (value ?? "").trim();
   if (/^[A-Za-z0-9]{22}$/.test(trimmed)) return trimmed;
@@ -117,13 +163,18 @@ if (songs.length === 0) {
   process.exit(1);
 }
 
+const name = displayName || csvPath.replace(/\.csv$/i, "").replace(/^.*[\\/]/, "") || "Playlist";
+const slug = slugify(name);
+
 const lines = [
-  'import type { Song } from "../types/song";',
+  'import type { Playlist } from "../../types/playlist";',
   "",
   "// GERADO AUTOMATICAMENTE a partir do CSV do Exportify — evite editar à mão.",
   "// Gerado em: " + new Date().toISOString().slice(0, 10) + " — " + songs.length + " músicas.",
-  "",
-  "export const songs: Song[] = [",
+  "export const playlist: Playlist = {",
+  "  id: " + JSON.stringify(slug) + ",",
+  "  name: " + JSON.stringify(name) + ",",
+  "  songs: [",
 ];
 for (const song of songs) {
   const parts = [
@@ -137,13 +188,16 @@ for (const song of songs) {
   lines.push("    " + parts.join(",\n    ") + ",");
   lines.push("  },");
 }
-lines.push("];");
+lines.push("  ],");
+lines.push("};");
 lines.push("");
-writeFileSync(resolve(root, "src/data/songs.ts"), lines.join("\n"), "utf8");
 
-console.log("✔ " + songs.length + " músicas escritas em src/data/songs.ts.");
+mkdirSync(playlistsDir, { recursive: true });
+writeFileSync(resolve(playlistsDir, slug + ".ts"), lines.join("\n"), "utf8");
+const total = writeIndex();
+
+console.log("✔ Playlist \"" + name + "\" com " + songs.length + " músicas escrita em src/data/playlists/" + slug + ".ts");
+console.log("✔ index.ts regenerado — " + total + " playlist(s) disponível(is) no jogo.");
 if (previewCol !== -1 && withoutPreview > 0) {
-  console.log(
-    "⚠ " + withoutPreview + " delas estão SEM prévia no CSV — devem virar 'Indisponível' no jogo."
-  );
+  console.log("⚠ " + withoutPreview + " delas estão SEM prévia no CSV.");
 }

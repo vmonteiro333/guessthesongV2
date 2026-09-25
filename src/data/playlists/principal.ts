@@ -1,9 +1,11 @@
-import type { Song } from "../types/song";
+import type { Playlist } from "../../types/playlist";
 
-// GERADO AUTOMATICAMENTE a partir do CSV do Exportify — evite editar à mão.
-// Gerado em: 2026-09-22 — 940 músicas.
+// GERADO AUTOMATICAMENTE (migração de src/data/songs.ts) — evite editar à mão.
+export const playlist: Playlist = {
+  id: "principal",
+  name: "Playlist Vitinho",
+  songs: [
 
-export const songs: Song[] = [
   {
     id: "song-001",
     title: "Londres Freestyle (Bônus)",
@@ -5644,4 +5646,5 @@ export const songs: Song[] = [
     artist: "BK, Nansy Silvvz, Gigantes",
     spotifyUrl: "https://open.spotify.com/track/6S2i0NlITbGZw8ltpUkwO7",
   },
-];
+  ],
+};
