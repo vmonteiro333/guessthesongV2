@@ -10,10 +10,11 @@ import {
 export type PlayerServiceStatus = "boot" | "needs_login" | "connecting" | "ready" | "error";
 export type SnippetResult = "completed" | "stopped";
 
-const POLL_INTERVAL_MS = 50;
-const EVIDENCE_GRACE_MS = 1_500;
-const PLAYBACK_EVIDENCE_TIMEOUT_MS = 15_000;
-const ENFORCE_STOP_MS = 15_000;
+const EVIDENCE_TIMEOUT_MS = 15_000;
+const ENFORCE_STOP_MS = 12_000;
+const POLL_MS = 150;
+const POLL_FAST_MS = 90;
+const CLOCK_SAFETY_MS = 350; // folga do failsafe de rede (não interfere no corte normal)
 
 export interface UseAudioResult {
   serviceStatus: PlayerServiceStatus;
@@ -25,7 +26,7 @@ export interface UseAudioResult {
 }
 
 /**
- * Sessão de áudio via Web Playback SDK (áudio completo, Premium).
+ * Sessão de áudio via Web Playback SDK + Web API (áudio completo, Premium).
  * O player é um SINGLETON de página (sobrevive ao remount do StrictMode).
  */
 export function useAudio(): UseAudioResult {
@@ -88,79 +89,116 @@ export function useAudio(): UseAudioResult {
   }, []);
 
   /**
-   * Toca do zero e corta no limite da etapa. O cronômetro conta só TEMPO DE
-   * ÁUDIO (começa na evidência de posição avançando), então o pause sempre
-   * cai com som fluindo e é honrado. Failsafe curto cobre travadas do polling.
+   * Toca do zero e corta no limite da etapa. Corte decidido pela POSIÇÃO
+   * reportada pela Web API (polling) — se o progresso não chegar, o relógio
+   * ancorado na evidência corta com folga; se a evidência não chegar em 15s,
+   * falha limpando (pause + enforce).
    */
   const playSnippet = useCallback(async (limitSeconds: number): Promise<SnippetResult> => {
     const player = getSpotifyWebPlayer();
-
     const session = ++sessionRef.current;
-    const limitMs = Math.max(50, Math.round(limitSeconds * 1000));
     const mySession = session;
-
-    const safeStop = (): void => {
-      player.pause();
-      void player.enforceStop(ENFORCE_STOP_MS, () => sessionRef.current !== mySession);
-    };
+    const limitMs = Math.max(50, Math.round(limitSeconds * 1000));
+    const cancelled = (): boolean => sessionRef.current !== mySession;
 
     await player.playFromStart();
-    if (session !== sessionRef.current) {
-      safeStop();
+    if (cancelled()) {
+      void player.enforceStop(ENFORCE_STOP_MS, cancelled);
       return "stopped";
     }
 
-    let audioZeroAt: number;
-    try {
-      audioZeroAt = await player.waitForPlaybackEvidence(PLAYBACK_EVIDENCE_TIMEOUT_MS);
-    } catch (error) {
-      if (session !== sessionRef.current) return "stopped";
-      safeStop();
-      throw error;
-    }
-    if (session !== sessionRef.current) {
-      safeStop();
-      return "stopped";
-    }
-
-    return new Promise<SnippetResult>((resolve) => {
+    return new Promise<SnippetResult>((resolve, reject) => {
       let settled = false;
-      let pollTimer = 0;
+      let timer = 0;
       let failsafeTimer = 0;
-      let unsubscribeFinish: () => void = () => {};
+      let anchor: number | null = null;
+      let evidenceSeen = false;
+      let last: { pos: number; at: number } | null = null;
+      const startedAt = performance.now();
 
-      const finish = (result: SnippetResult) => {
+      const cleanup = (): void => {
+        window.clearTimeout(timer);
+        window.clearTimeout(failsafeTimer);
+      };
+
+      const finish = (result: SnippetResult): void => {
         if (settled) return;
         settled = true;
-        window.clearInterval(pollTimer);
-        window.clearTimeout(failsafeTimer);
-        unsubscribeFinish();
-        if (result === "completed") safeStop();
+        cleanup();
+        if (result === "completed") {
+          void player.enforceStop(ENFORCE_STOP_MS, cancelled);
+        }
         resolve(result);
       };
 
-      const check = (position: number) => {
+      const fail = (message: string): void => {
         if (settled) return;
-        if (session !== sessionRef.current) {
+        settled = true;
+        cleanup();
+        void player.enforceStop(ENFORCE_STOP_MS, cancelled);
+        reject(new Error(message));
+      };
+
+      // Failsafe absoluto: se NADA decidir até aqui, corta.
+      failsafeTimer = window.setTimeout(() => {
+        fail("A reprodução do Spotify travou. Tente ouvir novamente.");
+      }, EVIDENCE_TIMEOUT_MS + limitMs + 8_000);
+
+      const loop = async (): Promise<void> => {
+        if (settled) return;
+        const st = await player.fetchWebPlaybackState();
+        if (settled) return;
+        if (cancelled()) {
           finish("stopped");
           return;
         }
-        if (position >= limitMs) finish("completed");
+        const now = performance.now();
+
+        if (st.ok && st.snapshot && st.snapshot.isPlaying && st.snapshot.progressMs !== null) {
+          const pos = st.snapshot.progressMs;
+          const advanced = last !== null && pos > last.pos && now - last.at >= 150;
+
+          // Evidência: primeira amostra confiável de áudio jovem (pos pequena).
+          if (!evidenceSeen && (advanced || pos > 500) && pos <= 1000) {
+            evidenceSeen = true;
+            anchor = now - pos;
+          }
+          last = { pos, at: now };
+
+          if (evidenceSeen && anchor !== null) {
+            const audioElapsed = now - anchor;
+            // CORTE ÚNICO por relógio ancorado (sem subtração no limite).
+            if (audioElapsed >= limitMs) {
+              finish("completed");
+              return;
+            }
+            // Failsafe por posição (rede atrasando o relógio da aba).
+            if (pos >= limitMs + CLOCK_SAFETY_MS) {
+              finish("completed");
+              return;
+            }
+          }
+        } else if (st.ok && st.snapshot && !st.snapshot.isPlaying && last !== null) {
+          // O Spotify reportou PAUSE que não veio do jogo: o áudio morreu
+          // (ex.: device despejado). Corta como fim para não ficar cego.
+          if (evidenceSeen) {
+            finish("completed");
+            return;
+          }
+          last = null;
+        }
+
+        if (!evidenceSeen && now - startedAt >= EVIDENCE_TIMEOUT_MS) {
+          fail("O Spotify não começou a tocar a tempo. Tente ouvir novamente.");
+          return;
+        }
+
+        const nearEnd =
+          evidenceSeen && anchor !== null && now >= anchor + limitMs - 400;
+        timer = window.setTimeout(() => void loop(), nearEnd ? POLL_FAST_MS : POLL_MS);
       };
 
-      pollTimer = window.setInterval(() => {
-        if (settled) return;
-        void player.getPosition().then(check).catch(() => {});
-      }, POLL_INTERVAL_MS);
-
-      unsubscribeFinish = player.onFinish(() => finish("completed"));
-
-      // Failsafe: âncora + limite + folga curta (o corte normal é por posição;
-      // este só cobre travadas do relógio de posição).
-      failsafeTimer = window.setTimeout(
-        () => finish("completed"),
-        Math.max(0, audioZeroAt + limitMs + EVIDENCE_GRACE_MS - performance.now())
-      );
+      void loop();
     });
   }, []);
 

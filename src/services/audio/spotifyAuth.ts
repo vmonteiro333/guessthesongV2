@@ -4,7 +4,7 @@ import {
   getSpotifyRedirectUri,
 } from "../../config/spotify";
 
-const TOKENS_KEY = "gts:spotify:tokens";
+const TOKENS_KEY = "gts:spotify:tokens:v2";
 const VERIFIER_KEY = "gts:spotify:verifier";
 const STATE_KEY = "gts:spotify:state";
 const AUTH_URL = "https://accounts.spotify.com/authorize";
@@ -150,9 +150,10 @@ async function doHandleAuthRedirect(): Promise<boolean> {
 }
 
 /** Access token válido, renovando sozinho quando perto de expirar. */
-export async function getValidAccessToken(): Promise<string> {
+export async function getValidAccessToken(force = false): Promise<string> {
   const tokens = loadTokens();
   if (!tokens) throw new Error("NOT_LOGGED_IN");
+  if (!force && Date.now() < tokens.expiresAt) return tokens.accessToken;
   if (Date.now() < tokens.expiresAt) return tokens.accessToken;
   if (!tokens.refreshToken) {
     clearTokens();
