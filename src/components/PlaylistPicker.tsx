@@ -1,3 +1,4 @@
+import { assetUrl } from "../config/assets";
 import type { Playlist } from "../types/playlist";
 
 interface PlaylistPickerProps {
@@ -20,6 +21,7 @@ export default function PlaylistPicker({ playlists, onSelect }: PlaylistPickerPr
             className="picker-item"
             onClick={() => onSelect(playlist)}
           >
+            <PlaylistCover playlist={playlist} />
             <span className="picker-name">{playlist.name}</span>
             <span className="picker-count">
               {playlist.songs.length} música{playlist.songs.length === 1 ? "" : "s"}
@@ -31,5 +33,18 @@ export default function PlaylistPicker({ playlists, onSelect }: PlaylistPickerPr
         Para adicionar mais: <code>node scripts/convert-csv.mjs playlist.csv "Nome"</code>
       </p>
     </section>
+  );
+}
+
+function PlaylistCover({ playlist }: { playlist: Playlist }) {
+  const src = playlist.cover ? assetUrl(playlist.cover) : null;
+  if (src) {
+    return <img className="picker-cover" src={src} alt="" loading="lazy" />;
+  }
+  // Fallback: iniciais da playlist (nada quebra sem imagem)
+  return (
+    <span className="picker-cover picker-cover--fallback" aria-hidden="true">
+      {playlist.name.slice(0, 2).toUpperCase()}
+    </span>
   );
 }

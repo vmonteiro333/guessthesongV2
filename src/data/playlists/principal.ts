@@ -4,8 +4,8 @@ import type { Playlist } from "../../types/playlist";
 export const playlist: Playlist = {
   id: "principal",
   name: "Playlist Vitinho",
+  cover: "/playlists/principal.png",
   songs: [
-
   {
     id: "song-001",
     title: "Londres Freestyle (Bônus)",

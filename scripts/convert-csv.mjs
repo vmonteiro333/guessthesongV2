@@ -174,6 +174,7 @@ const lines = [
   "export const playlist: Playlist = {",
   "  id: " + JSON.stringify(slug) + ",",
   "  name: " + JSON.stringify(name) + ",",
+  "  cover: " + JSON.stringify("/playlists/" + slug + ".jpg") + ",",
   "  songs: [",
 ];
 for (const song of songs) {
