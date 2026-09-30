@@ -5,6 +5,7 @@ import type { Playlist } from "../../types/playlist";
 export const playlist: Playlist = {
   id: "playlist-bala",
   name: "Playlist Bala",
+  cover: "/playlists/playlist-bala.png",
   songs: [
   {
     id: "song-001",
