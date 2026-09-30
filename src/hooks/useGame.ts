@@ -41,6 +41,7 @@ export interface UseGameResult {
   history: SongRoundResult[];
   completedSongs: number;
   listenSeq: number;
+  streak: number;
   startGame: () => void;
   listen: () => void;
   skip: () => void;
@@ -63,6 +64,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
   const [score, setScore] = useState(0);
   const [history, setHistory] = useState<SongRoundResult[]>([]);
   const [listenSeq, setListenSeq] = useState(0);
+  const [streak, setStreak] = useState(0);
 
   /** Estado da rodada em andamento (artista descoberto antes do título). */
   const roundRef = useRef<{ artistCorrect: boolean; artistAtStage: number | null }>({
@@ -211,6 +213,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     setStageIndex(0);
     setAnswer({ artist: "", title: "" });
     setScore(0);
+    setStreak(0);
     setHistory([]);
     setFeedback(null);
     loadSeqRef.current += 1;
@@ -273,12 +276,14 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
       setAnswer({ artist: "", title: "" });
 
       if (solved) {
+        setStreak((n) => n + 1);
         setFeedback({
           kind: "correct",
           message: `Acertou! ${song.artist} — ${song.title}`,
           detail: `+${points} ponto${points === 1 ? "" : "s"}`,
         });
       } else {
+        setStreak(0);
         setFeedback({
           kind: "round_failed",
           message: `Fim da rodada. A música era ${song.artist} — ${song.title}.`,
@@ -386,6 +391,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     score,
     history,
     completedSongs: history.filter((entry) => entry.finalized).length,
+    streak,
     startGame,
     listen,
     skip,

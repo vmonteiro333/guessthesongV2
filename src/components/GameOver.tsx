@@ -8,11 +8,18 @@ import { RestartIcon } from "./icons";
 interface GameOverProps {
   score: number;
   history: SongRoundResult[];
+  playlistName: string;
   onRestart: () => void;
   onChoosePlaylist: () => void;
 }
 
-export default function GameOver({ score, history, onRestart, onChoosePlaylist }: GameOverProps) {
+export default function GameOver({
+  score,
+  history,
+  playlistName,
+  onRestart,
+  onChoosePlaylist,
+}: GameOverProps) {
   const stats = useMemo(() => computeGameStats(history), [history]);
   const previousBest = useMemo(() => loadBestScore(), []);
   const isRecord = score > previousBest && score > 0;
@@ -32,17 +39,13 @@ export default function GameOver({ score, history, onRestart, onChoosePlaylist }
       <h2 id="gameover-title" className="gameover-title">
         Fim de jogo
       </h2>
-      {isRecord && <p className="record-badge">Novo recorde pessoal!</p>}
+      {isRecord && <p className="record-badge">🏆 Novo recorde pessoal</p>}
+
+      <p className="gameover-score">{score}</p>
+      <p className="gameover-score-label">pontos</p>
+      <p className="gameover-playlist">{playlistName}</p>
 
       <div className="stats-grid">
-        <div className="stat">
-          <p className="stat-value">{score}</p>
-          <p className="stat-label">Pontuação</p>
-        </div>
-        <div className="stat">
-          <p className="stat-value">{Math.max(previousBest, score)}</p>
-          <p className="stat-label">Recorde</p>
-        </div>
         <div className="stat">
           <p className="stat-value">
             {stats.solved}/{stats.played}
@@ -55,11 +58,19 @@ export default function GameOver({ score, history, onRestart, onChoosePlaylist }
         </div>
         <div className="stat">
           <p className="stat-value">{stats.errors}</p>
-          <p className="stat-label">Indisponíveis</p>
+          <p className="stat-label">Indisp.</p>
         </div>
         <div className="stat">
           <p className="stat-value">{average}</p>
-          <p className="stat-label">Média p/ acertar</p>
+          <p className="stat-label">Média</p>
+        </div>
+        <div className="stat">
+          <p className="stat-value">{Math.max(previousBest, score)}</p>
+          <p className="stat-label">Recorde</p>
+        </div>
+        <div className="stat">
+          <p className="stat-value">{stats.bestRound?.points ?? 0}</p>
+          <p className="stat-label">Melhor rodada</p>
         </div>
       </div>
 

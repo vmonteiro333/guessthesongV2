@@ -1,13 +1,22 @@
 import { LockIcon } from "./icons";
+import AudioViz from "./AudioViz";
+import type { SnippetPhase } from "../hooks/useAudio";
 
 interface NowPlayingPanelProps {
   secret: boolean;
   playing: boolean;
+  phase: SnippetPhase;
   song: { title: string; artist: string } | null;
+  streak: number;
 }
 
-/** Painel de áudio: secreto durante a rodada, revelado no fim (sem iframe!). */
-export default function NowPlayingPanel({ secret, playing, song }: NowPlayingPanelProps) {
+export default function NowPlayingPanel({
+  secret,
+  playing,
+  phase,
+  song,
+  streak,
+}: NowPlayingPanelProps) {
   return (
     <section
       className={secret ? "now-playing now-playing--secret" : "now-playing"}
@@ -18,21 +27,27 @@ export default function NowPlayingPanel({ secret, playing, song }: NowPlayingPan
           <span className="np-lock" aria-hidden="true">
             <LockIcon />
           </span>
-          <p className="np-title">Trecho secreto</p>
+          <p className="np-title">Escute com atenção</p>
+          <AudioViz phase={phase} />
           <p className="np-sub">
-            {playing ? (
+            {phase === "buffering" ? (
+              "Preparando o áudio…"
+            ) : playing ? (
               <span className="np-playing">
-                <span className="eq" aria-hidden="true">
-                  <i />
-                  <i />
-                  <i />
-                </span>
                 Tocando trecho…
               </span>
             ) : (
               "Responda ou pule para revelar"
             )}
           </p>
+          {streak >= 2 && (
+            <span className="streak">
+              <span className="streak-flame" aria-hidden="true">
+                🔥
+              </span>
+              {streak} acertos seguidos
+            </span>
+          )}
         </>
       ) : (
         <>

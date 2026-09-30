@@ -6,6 +6,7 @@ interface GameHeaderProps {
   doneCount: number;
   playlistName: string;
   onOpenResults: () => void;
+  onExit: () => void;
 }
 
 export default function GameHeader({
@@ -14,6 +15,7 @@ export default function GameHeader({
   doneCount,
   playlistName,
   onOpenResults,
+  onExit,
 }: GameHeaderProps) {
   return (
     <header className="site-header">
@@ -24,6 +26,14 @@ export default function GameHeader({
         <h1 className="brand-name">Guess the Song</h1>
       </div>
       <div className="header-meta">
+        <button
+          type="button"
+          className="chip btn-exit"
+          onClick={onExit}
+          aria-label="Voltar para a escolha de playlists"
+        >
+          ←
+        </button>
         <span className="chip chip-score" aria-label={`Pontuação: ${score} pontos`}>
           {score} pts
         </span>

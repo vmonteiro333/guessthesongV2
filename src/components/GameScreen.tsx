@@ -36,16 +36,11 @@ export default function GameScreen({
   const canListen = gameStatus === "ready" || gameStatus === "waiting_answer";
   const isLastRound = currentSongIndex + 1 >= queue.length;
   const serviceFatal = audio.serviceStatus === "error";
-  const animKey = `${game.currentSong?.id ?? "none"}-${game.stageIndex}-${game.listenSeq}`;
   return (
     <section className="game-screen" aria-label="Rodada atual">
       <AlbumBackdrop coverUrl={audio.trackMeta?.coverUrl ?? null} revealed={roundOver} />
 
-      <StageIndicator
-        stageIndex={game.stageIndex}
-        phase={audio.snippetPhase}
-        animKey={animKey}
-      />
+      <StageIndicator stageIndex={game.stageIndex} />
 
       {serviceFatal && (
         <div className="alert" role="alert">
@@ -60,11 +55,13 @@ export default function GameScreen({
       <NowPlayingPanel
         secret={!roundOver}
         playing={gameStatus === "playing"}
+        phase={audio.snippetPhase}
         song={
           roundOver && game.currentSong
             ? { title: game.currentSong.title, artist: game.currentSong.artist }
             : null
         }
+        streak={game.streak}
       />
 
       {gameStatus === "loading" && <LoadingState message="Carregando a música…" />}
@@ -120,17 +117,19 @@ export default function GameScreen({
         </div>
       )}
 
-      <ResultDrawer
-        open={resultsOpen}
-        results={history}
-        onClose={onCloseResults}
-      />
+      <ResultDrawer open={resultsOpen} results={history} onClose={onCloseResults} />
     </section>
   );
 }
 
 function FeedbackPanel({ feedback }: { feedback: GuessFeedback | null }) {
   if (!feedback) return null;
+
+  const isCorrect = feedback.kind === "correct";
+  const isFailed = feedback.kind === "round_failed";
+  const pointsMatch = feedback.detail?.match(/^\+(\d+)/);
+  const points = isCorrect && pointsMatch ? pointsMatch[1] : null;
+
   return (
     <div
       key={`${feedback.kind}-${feedback.message}`}
@@ -138,9 +137,18 @@ function FeedbackPanel({ feedback }: { feedback: GuessFeedback | null }) {
       role="status"
       aria-live="polite"
     >
-      {feedback.kind === "correct" && <ConfettiBurst />}
-      <p className="feedback-message">{feedback.message}</p>
-      {feedback.detail && <p className="feedback-detail">{feedback.detail}</p>}
+      {isCorrect && <ConfettiBurst />}
+      {isCorrect && points !== null && (
+        <span className="points-float" aria-hidden="true">
+          +{points}
+        </span>
+      )}
+      <p className="feedback-message">
+        {isCorrect && "✓ Acertou! "}
+        {isFailed && "✕ Não foi dessa vez — "}
+        {feedback.message.replace(/^Acertou! /, "").replace(/^Fim da rodada\. /, "")}
+      </p>
+      {feedback.detail && !isCorrect && <p className="feedback-detail">{feedback.detail}</p>}
     </div>
   );
 }
@@ -152,7 +160,7 @@ function NextButton({ onClick, isLast }: { onClick: () => void; isLast: boolean 
   }, []);
   return (
     <button ref={buttonRef} type="button" className="btn btn-primary btn-large" onClick={onClick}>
-      {isLast ? "Ver resultado final" : "Próxima música"}
+      {isLast ? "Ver resultado final" : "Próxima música →"}
     </button>
   );
 }

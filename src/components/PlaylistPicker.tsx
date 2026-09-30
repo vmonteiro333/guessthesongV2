@@ -8,11 +8,15 @@ interface PlaylistPickerProps {
 
 export default function PlaylistPicker({ playlists, onSelect }: PlaylistPickerProps) {
   return (
-    <section className="start-screen panel" aria-labelledby="picker-title">
-      <p className="start-kicker">Escolha a playlist</p>
+    <section className="start-screen" aria-labelledby="picker-title">
+      <p className="start-kicker">Escolha sua playlist</p>
       <h2 id="picker-title" className="start-title">
-        Com qual a gente joga?
+        Com qual vibe você vai jogar?
       </h2>
+      <p className="start-tagline">
+        Trechos de 0,1s a 16s. Quanto menos áudio precisar, mais pontos vale.
+      </p>
+
       <div className="picker-list">
         {playlists.map((playlist) => (
           <button
@@ -22,13 +26,16 @@ export default function PlaylistPicker({ playlists, onSelect }: PlaylistPickerPr
             onClick={() => onSelect(playlist)}
           >
             <PlaylistCover playlist={playlist} />
-            <span className="picker-name">{playlist.name}</span>
-            <span className="picker-count">
-              {playlist.songs.length} música{playlist.songs.length === 1 ? "" : "s"}
+            <span className="picker-item-body">
+              <span className="picker-name">{playlist.name}</span>
+              <span className="picker-count">
+                {playlist.songs.length} música{playlist.songs.length === 1 ? "" : "s"}
+              </span>
             </span>
           </button>
         ))}
       </div>
+
       <p className="start-footnote">
         Para adicionar mais: <code>node scripts/convert-csv.mjs playlist.csv "Nome"</code>
       </p>
@@ -41,9 +48,8 @@ function PlaylistCover({ playlist }: { playlist: Playlist }) {
   if (src) {
     return <img className="picker-cover" src={src} alt="" loading="lazy" />;
   }
-  // Fallback: iniciais da playlist (nada quebra sem imagem)
   return (
-    <span className="picker-cover picker-cover--fallback" aria-hidden="true">
+    <span className="picker-cover--fallback" aria-hidden="true">
       {playlist.name.slice(0, 2).toUpperCase()}
     </span>
   );

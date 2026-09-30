@@ -13,6 +13,7 @@ import LoadingState from "./components/LoadingState";
 import SpotifyConnect from "./components/SpotifyConnect";
 import PlaylistPicker from "./components/PlaylistPicker";
 import { loadSelectedPlaylistId, saveSelectedPlaylistId } from "./utils/storage";
+import Ribbons from "./components/Ribbons";
 
 function findPlaylist(id: string | null): Playlist | null {
   if (!id) return null;
@@ -29,7 +30,10 @@ export default function App() {
     setSelected(playlist);
     saveSelectedPlaylistId(playlist.id);
   };
-  const backToPicker = (): void => setSelected(null);
+  const backToPicker = (): void => {
+    audio.stopPlayback();
+    setSelected(null);
+  };
 
   let screen: ReactNode;
   if (playlists.length === 0) {
@@ -68,10 +72,10 @@ export default function App() {
   return (
     <div className="app">
       <main className="app-main">{screen}</main>
+      <Ribbons />
     </div>
   );
 }
-
 interface GameProps {
   playlist: Playlist;
   audio: ReturnType<typeof useAudio>;
@@ -100,6 +104,7 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
       <GameOver
         score={game.score}
         history={game.history}
+        playlistName={playlist.name}
         onRestart={game.startGame}
         onChoosePlaylist={onChoosePlaylist}
       />
@@ -125,6 +130,7 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
           total={game.queue.length}
           doneCount={doneCount}
           onOpenResults={() => setDrawerOpen(true)}
+          onExit={onChoosePlaylist}
         />
       )}
       <main className="app-main">{screen}</main>
