@@ -104,7 +104,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    flex-wrap: wrap;        /* em telas estreitas, chips caem para a 2ª linha */
+    row-gap: 10px;
     padding: 20px clamp(14px, 4vw, 24px) 0;
   }
   
@@ -112,7 +113,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    min-width: 0;
+    flex-shrink: 0;         /* a marca NUNCA é espremida (fim do "Guess the") */
   }
   
   .brand-mark {
@@ -880,8 +881,7 @@
 }
 
 .stage-fill--idle {
-  width: 100%;
-  opacity: 0.3;
+  display: none; /* sem trecho tocando: só os 7 segmentos */
 }
 
 .stage-fill--buffer {

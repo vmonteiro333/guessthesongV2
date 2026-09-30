@@ -122,7 +122,6 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
         <GameHeader
           playlistName={playlist.name}
           score={game.score}
-          currentIndex={Math.min(game.currentSongIndex + 1, game.queue.length)}
           total={game.queue.length}
           doneCount={doneCount}
           onOpenResults={() => setDrawerOpen(true)}
