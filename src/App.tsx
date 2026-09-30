@@ -55,7 +55,6 @@ export default function App() {
   } else if (selected === null) {
     screen = <PlaylistPicker playlists={playlists} onSelect={choosePlaylist} />;
   } else {
-    // key por playlist: trocar remonta o jogo com estado fresco (idle).
     screen = (
       <Game
         key={selected.id}
@@ -81,9 +80,11 @@ interface GameProps {
 
 function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
   const game = useGame(audio, playlist);
+  const [drawerOpen, setDrawerOpen] = useState(false);   // ← voltou (dono do estado)
   const { gameStatus } = game;
 
   const showHeader = gameStatus !== "idle" && gameStatus !== "game_over";
+  const doneCount = game.history.filter((entry) => entry.finalized).length;
 
   let screen: ReactNode;
   if (gameStatus === "idle") {
@@ -104,7 +105,15 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
       />
     );
   } else {
-    screen = <GameScreen game={game} audio={audio} />;
+    screen = (
+      <GameScreen
+        game={game}
+        audio={audio}
+        catalog={playlist.songs}
+        resultsOpen={drawerOpen}                      // ← nova prop
+        onCloseResults={() => setDrawerOpen(false)}   // ← nova prop
+      />
+    );
   }
 
   return (
@@ -115,6 +124,8 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
           score={game.score}
           currentIndex={Math.min(game.currentSongIndex + 1, game.queue.length)}
           total={game.queue.length}
+          doneCount={doneCount}
+          onOpenResults={() => setDrawerOpen(true)}
         />
       )}
       <main className="app-main">{screen}</main>

@@ -1,22 +1,32 @@
 import { useEffect, useRef } from "react";
 import type { UseGameResult, GuessFeedback } from "../hooks/useGame";
 import type { UseAudioResult } from "../hooks/useAudio";
+import type { Song } from "../types/song";
 import StageIndicator from "./StageIndicator";
 import NowPlayingPanel from "./NowPlayingPanel";
 import AlbumBackdrop from "./AlbumBackdrop";
 import ConfettiBurst from "./ConfettiBurst";
 import AnswerForm from "./AnswerForm";
 import LoadingState from "./LoadingState";
-import ResultList from "./ResultList";
+import ResultDrawer from "./ResultDrawer";
 import { formatSeconds } from "../utils/gameRules";
 import { PlayIcon } from "./icons";
 
 interface GameScreenProps {
   game: UseGameResult;
   audio: UseAudioResult;
+  catalog: Song[];
+  resultsOpen: boolean;
+  onCloseResults: () => void;
 }
 
-export default function GameScreen({ game, audio }: GameScreenProps) {
+export default function GameScreen({
+  game,
+  audio,
+  catalog,
+  resultsOpen,
+  onCloseResults,
+}: GameScreenProps) {
   const { gameStatus, feedback, currentSongIndex, queue, history } = game;
 
   const roundOver = gameStatus === "finished";
@@ -27,7 +37,6 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
   const isLastRound = currentSongIndex + 1 >= queue.length;
   const serviceFatal = audio.serviceStatus === "error";
   const animKey = `${game.currentSong?.id ?? "none"}-${game.stageIndex}-${game.listenSeq}`;
-
   return (
     <section className="game-screen" aria-label="Rodada atual">
       <AlbumBackdrop coverUrl={audio.trackMeta?.coverUrl ?? null} revealed={roundOver} />
@@ -92,7 +101,8 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
           </div>
 
           <AnswerForm
-            title={game.answer.title}
+            value={game.answer.title}
+            catalog={catalog}
             onChange={game.setAnswerField}
             onSubmit={game.submitAnswer}
             onSkip={game.skip}
@@ -110,7 +120,11 @@ export default function GameScreen({ game, audio }: GameScreenProps) {
         </div>
       )}
 
-      <ResultList results={history} />
+      <ResultDrawer
+        open={resultsOpen}
+        results={history}
+        onClose={onCloseResults}
+      />
     </section>
   );
 }
