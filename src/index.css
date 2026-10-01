@@ -1660,3 +1660,96 @@
 .track-modal-actions .btn {
   flex: 1;
 }
+
+/* ===== Gameplay: escada de valor, crítica, hero button ===== */
+.stage-critical-tag {
+  margin-left: auto;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--error);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.1);
+  border-radius: 999px;
+  padding: 4px 11px;
+  animation: step-pulse 1.4s ease-in-out infinite;
+}
+
+.stage--critical {
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.stage--critical::before {
+  background: radial-gradient(420px 180px at 50% -40%, rgba(248, 113, 113, 0.14), transparent 70%);
+}
+
+/* animação de perda de valor (o span é remontado a cada etapa) */
+.stage-points {
+  animation: value-drop 0.55s var(--ease);
+}
+
+@keyframes value-drop {
+  0% {
+    color: var(--error);
+    transform: translateY(5px) scale(1.18);
+    opacity: 0.5;
+  }
+  60% {
+    color: var(--accent);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.value-ladder {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.lad {
+  width: 28px;
+  padding: 5px 0;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  transition: opacity var(--t-med) var(--ease);
+}
+
+.lad--lost {
+  opacity: 0.3;
+  text-decoration: line-through;
+}
+
+.lad--current {
+  background: var(--accent-grad);
+  color: var(--accent-ink);
+  box-shadow: 0 0 18px var(--accent-glow);
+  transform: scale(1.14);
+  font-weight: 800;
+}
+
+/* "Ouvir" promovido a ação central da tela */
+.listen-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  text-align: center;
+}
+
+.listen-row .btn-listen {
+  width: 100%;
+  min-height: 60px;
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

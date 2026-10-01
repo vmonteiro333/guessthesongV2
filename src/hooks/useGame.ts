@@ -43,6 +43,8 @@ export interface UseGameResult {
   listenSeq: number;
   streak: number;
   activeResult: SongRoundResult | null;
+  maxStreak: number;
+  lastBrokenCombo: number;
   startGame: () => void;
   listen: () => void;
   skip: () => void;
@@ -66,6 +68,9 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
   const [history, setHistory] = useState<SongRoundResult[]>([]);
   const [listenSeq, setListenSeq] = useState(0);
   const [streak, setStreak] = useState(0);
+  const [maxStreak, setMaxStreak] = useState(0);
+  const [lastBrokenCombo, setLastBrokenCombo] = useState(0);
+  const streakRef = useRef(0);
 
   /** Estado da rodada em andamento (artista descoberto antes do título). */
   const roundRef = useRef<{ artistCorrect: boolean; artistAtStage: number | null }>({
@@ -187,6 +192,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
       return;
     }
     roundRef.current = { artistCorrect: false, artistAtStage: null };
+    setLastBrokenCombo(0);
     setCurrentSongIndex(next);
     setStageIndex(0);
     setAnswer({ artist: "", title: "" });
@@ -217,6 +223,10 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     setStreak(0);
     setHistory([]);
     setFeedback(null);
+    streakRef.current = 0;
+    setStreak(0);
+    setMaxStreak(0);
+    setLastBrokenCombo(0);
     loadSeqRef.current += 1;
     const token = loadSeqRef.current;
     setGameStatus("loading");
@@ -277,15 +287,18 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
       setAnswer({ artist: "", title: "" });
 
       if (solved) {
-        setStreak((n) => n + 1);
-        setFeedback({
+        const nextStreak = streakRef.current + 1;
+        streakRef.current = nextStreak;
+        setStreak(nextStreak);
+        setMaxStreak((m) => Math.max(m, nextStreak));        setFeedback({
           kind: "correct",
           message: `Acertou! ${song.artist} — ${song.title}`,
           detail: `+${points} ponto${points === 1 ? "" : "s"}`,
         });
       } else {
-        setStreak(0);
-        setFeedback({
+        setLastBrokenCombo(streakRef.current >= 2 ? streakRef.current : 0);
+        streakRef.current = 0;
+        setStreak(0);        setFeedback({
           kind: "round_failed",
           message: `Fim da rodada. A música era ${song.artist} — ${song.title}.`,
           detail:
@@ -394,6 +407,8 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     history,
     completedSongs: history.filter((entry) => entry.finalized).length,
     streak,
+    maxStreak,
+    lastBrokenCombo,
     startGame,
     listen,
     skip,

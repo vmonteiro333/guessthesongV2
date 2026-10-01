@@ -7,6 +7,8 @@ interface TrackModalProps {
   onClose: () => void;
   onNext: () => void;
   isLastRound: boolean;
+  brokenCombo: number;
+  streakAfter: number;
 }
 
 /**
@@ -20,6 +22,7 @@ export default function TrackModal({
   onClose,
   onNext,
   isLastRound,
+  brokenCombo, streakAfter
 }: TrackModalProps) {
   const nextRef = useRef<HTMLButtonElement>(null);
 
@@ -71,7 +74,14 @@ export default function TrackModal({
           <p className="track-modal-title">{result.title}</p>
           <p className="track-modal-artist">{result.artist}</p>
         </div>
-
+        {solved && streakAfter >= 2 && (
+            <p className="combo-note">🔥 Combo ×{streakAfter} ativo</p>
+          )}
+          {!solved && brokenCombo > 0 && (
+            <p className="combo-note combo-note--broken">
+              💔 Seu combo de {brokenCombo} foi quebrado
+            </p>
+          )}
         <div className="track-modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Fechar

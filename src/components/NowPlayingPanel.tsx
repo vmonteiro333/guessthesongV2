@@ -41,11 +41,20 @@ export default function NowPlayingPanel({
             )}
           </p>
           {streak >= 2 && (
-            <span className="streak">
+            <span
+              className={
+                streak >= 5
+                  ? "streak streak--fire"
+                  : streak >= 3
+                    ? "streak streak--hot"
+                    : "streak"
+              }
+            >
               <span className="streak-flame" aria-hidden="true">
                 🔥
               </span>
-              {streak} acertos seguidos
+              COMBO ×{streak}
+              {streak >= 5 ? " — lendário" : streak >= 3 ? " — em chamas" : ""}
             </span>
           )}
         </>
