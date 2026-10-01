@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UseGameResult, GuessFeedback } from "../hooks/useGame";
 import type { UseAudioResult } from "../hooks/useAudio";
 import type { Song } from "../types/song";
@@ -11,6 +11,7 @@ import LoadingState from "./LoadingState";
 import ResultDrawer from "./ResultDrawer";
 import { formatSeconds } from "../utils/gameRules";
 import { PlayIcon } from "./icons";
+import TrackModal from "./TrackModal";
 
 interface GameScreenProps {
   game: UseGameResult;
@@ -28,7 +29,6 @@ export default function GameScreen({
   onCloseResults,
 }: GameScreenProps) {
   const { gameStatus, feedback, currentSongIndex, queue, history } = game;
-
   const roundOver = gameStatus === "finished";
   const canType =
     gameStatus === "ready" || gameStatus === "playing" || gameStatus === "waiting_answer";
@@ -36,6 +36,10 @@ export default function GameScreen({
   const canListen = gameStatus === "ready" || gameStatus === "waiting_answer";
   const isLastRound = currentSongIndex + 1 >= queue.length;
   const serviceFatal = audio.serviceStatus === "error";
+  const [modalDismissed, setModalDismissed] = useState(false);
+  useEffect(() => {
+    if (gameStatus === "finished") setModalDismissed(false);
+  }, [gameStatus, currentSongIndex]);
   return (
     <section className="game-screen" aria-label="Rodada atual">
       <AlbumBackdrop coverUrl={audio.trackMeta?.coverUrl ?? null} revealed={roundOver} />
@@ -67,7 +71,20 @@ export default function GameScreen({
       {gameStatus === "loading" && <LoadingState message="Carregando a música…" />}
       {gameStatus === "error" && <LoadingState message="Pulando para a próxima música…" />}
 
-      <FeedbackPanel feedback={feedback} />
+      <FeedbackPanel
+        feedback={feedback}
+        visible={!roundOver || modalDismissed}
+      />
+
+      {roundOver && game.activeResult && (
+        <TrackModal
+          result={game.activeResult}
+          spotifyUrl={game.currentSong?.spotifyUrl ?? null}
+          onClose={() => setModalDismissed(true)}
+          onNext={game.nextSong}
+          isLastRound={isLastRound}
+        />
+      )}
 
       {canType && !serviceFatal && (
         <>
@@ -122,8 +139,15 @@ export default function GameScreen({
   );
 }
 
-function FeedbackPanel({ feedback }: { feedback: GuessFeedback | null }) {
-  if (!feedback) return null;
+function FeedbackPanel({
+  feedback,
+  visible,
+}: {
+  feedback: GuessFeedback | null;
+  visible: boolean;
+}) {
+  if (!visible || !feedback) return null;
+  // ... resto igual
 
   const isCorrect = feedback.kind === "correct";
   const isFailed = feedback.kind === "round_failed";

@@ -274,7 +274,9 @@ export class SpotifyWebPlayer implements AudioPlayer {
       return;
     }
     if (res.status === 403) {
-      throw new Error("O Spotify recusou o comando de tocar (verifique Premium e os escopos do app).");
+      throw new Error(
+        "O Spotify recusou o comando de tocar. Causas mais comuns: (1) sua conta não está autorizada neste app — peça ao dono para adicionar seu e-mail no User Management do dashboard; (2) conta sem Premium; (3) faixa indisponível no seu país."
+      );
     }
     if (res.status === 404) {
       throw new Error("O device do jogo não está mais ativo — recarregue a página.");

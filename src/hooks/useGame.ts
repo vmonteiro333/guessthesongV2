@@ -42,6 +42,7 @@ export interface UseGameResult {
   completedSongs: number;
   listenSeq: number;
   streak: number;
+  activeResult: SongRoundResult | null;
   startGame: () => void;
   listen: () => void;
   skip: () => void;
@@ -378,6 +379,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
   }, [gameStatus, score]);
 
   return {
+    activeResult: history.find((entry) => entry.songId === currentSong?.id && entry.finalized) ?? null,
     listenSeq,
     gameStatus,
     queue,

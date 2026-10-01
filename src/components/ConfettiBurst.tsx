@@ -1,4 +1,4 @@
-const COLORS = ["#f2b544", "#4ade80", "#f87171", "#60a5fa", "#fde047", "#a78bfa"];
+const COLORS = ["#00e676", "#8dffc0", "#ffffff", "#00b85c", "#d0ffe9", "#00e676"];
 
 /** Confete CSS puro no acerto (sem bibliotecas). */
 export default function ConfettiBurst() {
