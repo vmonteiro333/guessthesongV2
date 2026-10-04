@@ -101,13 +101,14 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
     );
   } else if (gameStatus === "game_over") {
     screen = (
-      <GameOver
-        score={game.score}
-        history={game.history}
-        playlistName={playlist.name}
-        onRestart={game.startGame}
-        onChoosePlaylist={onChoosePlaylist}
-      />
+        <GameOver
+          score={game.score}
+          history={game.history}
+          playlistName={playlist.name}
+          maxStreak={game.maxStreak}
+          onRestart={game.startGame}
+          onChoosePlaylist={onChoosePlaylist}
+        />
     );
   } else {
     screen = (

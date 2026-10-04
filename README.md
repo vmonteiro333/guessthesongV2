@@ -68,4 +68,4 @@ Precisão do corte: o comando de pause leva ~200–400ms para surtirefeito no Sp
 Primeiro play de cada faixa: 1–3s de silêncio de buffering.
 Travadas raras de rede: retry automático reativando o device; sepersistir, ouvir de novo resolve.
 Sessão: exige login (Premium) e expira; renovada automaticamente,novo login quando necessário. Não abra duas abas do jogo.
-Faixas sem preview de metadados: raras; viram "Indisponível".
+Faixas sem preview de metadados: raras; viram "Indisponível". 

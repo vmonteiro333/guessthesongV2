@@ -9,20 +9,41 @@ interface GameOverProps {
   score: number;
   history: SongRoundResult[];
   playlistName: string;
+  maxStreak: number;
   onRestart: () => void;
   onChoosePlaylist: () => void;
+}
+
+const RANK_LABEL: Record<string, string> = {
+  S: "impecável",
+  A: "excelente",
+  B: "muito bem",
+  C: "na trilha",
+  D: "aquecendo",
+};
+
+function rankFor(solved: number, played: number): { grade: string; label: string } | null {
+  if (played === 0) return null;
+  const acc = solved / played;
+  if (acc >= 0.9) return { grade: "S", label: RANK_LABEL.S };
+  if (acc >= 0.7) return { grade: "A", label: RANK_LABEL.A };
+  if (acc >= 0.5) return { grade: "B", label: RANK_LABEL.B };
+  if (acc >= 0.3) return { grade: "C", label: RANK_LABEL.C };
+  return { grade: "D", label: RANK_LABEL.D };
 }
 
 export default function GameOver({
   score,
   history,
   playlistName,
+  maxStreak,
   onRestart,
   onChoosePlaylist,
 }: GameOverProps) {
   const stats = useMemo(() => computeGameStats(history), [history]);
   const previousBest = useMemo(() => loadBestScore(), []);
   const isRecord = score > previousBest && score > 0;
+  const rank = rankFor(stats.solved, stats.played);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -39,6 +60,16 @@ export default function GameOver({
       <h2 id="gameover-title" className="gameover-title">
         Fim de jogo
       </h2>
+
+      {rank && (
+        <div className="rank-block" aria-label={`Ranque ${rank.grade}: ${rank.label}`}>
+          <span className="rank-badge" aria-hidden="true">
+            {rank.grade}
+          </span>
+          <p className="rank-label">Ranque {rank.grade} — {rank.label}</p>
+        </div>
+      )}
+
       {isRecord && <p className="record-badge">🏆 Novo recorde pessoal</p>}
 
       <p className="gameover-score">{score}</p>
@@ -53,16 +84,16 @@ export default function GameOver({
           <p className="stat-label">Acertos</p>
         </div>
         <div className="stat">
-          <p className="stat-value">{stats.failed}</p>
-          <p className="stat-label">Erros</p>
-        </div>
-        <div className="stat">
-          <p className="stat-value">{stats.errors}</p>
-          <p className="stat-label">Indisp.</p>
+          <p className="stat-value">{maxStreak}</p>
+          <p className="stat-label">Maior combo</p>
         </div>
         <div className="stat">
           <p className="stat-value">{average}</p>
           <p className="stat-label">Média</p>
+        </div>
+        <div className="stat">
+          <p className="stat-value">{stats.failed}</p>
+          <p className="stat-label">Erros</p>
         </div>
         <div className="stat">
           <p className="stat-value">{Math.max(previousBest, score)}</p>
@@ -73,6 +104,19 @@ export default function GameOver({
           <p className="stat-label">Melhor rodada</p>
         </div>
       </div>
+
+      {/* momentos memoráveis — só com dados reais da sessão */}
+      {stats.bestRound && (
+        <p className="gameover-highlight">
+          ⚡ Você acertou <strong>"{stats.bestRound.title}"</strong> em{" "}
+          {formatSeconds(STAGES[stats.bestRound.solvedAtStage ?? 0])}!
+        </p>
+      )}
+      {maxStreak >= 2 && (
+        <p className="gameover-highlight">
+          🔥 Seu maior combo foi <strong>{maxStreak}</strong>.
+        </p>
+      )}
 
       {stats.bestRound ? (
         <p className="gameover-best-round">

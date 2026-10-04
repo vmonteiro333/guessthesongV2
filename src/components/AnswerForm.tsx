@@ -72,14 +72,28 @@ export default function AnswerForm({
   isLastStage,
 }: AnswerFormProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+    // Debounce: sugestões só após 350ms parado + mínimo de 3 caracteres.
+  // Equilíbrio: a lista continua ajudando quem JÁ sabe o que procura,
+  // mas deixa de ser "resposta de graça" por digitação mínima.
+  const [debounced, setDebounced] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const hasInput = value.trim().length > 0;
 
+  useEffect(() => {
+    const norm = normalizeText(value);
+    if (norm.length < 3) {
+      setDebounced("");
+      return;
+    }
+    const timer = window.setTimeout(() => setDebounced(value), 350);
+    return () => window.clearTimeout(timer);
+  }, [value]);
+
   const suggestions = useMemo(
-    () => buildSuggestions(value, catalog),
-    [value, catalog]
+    () => buildSuggestions(debounced, catalog),
+    [debounced, catalog]
   );
 
   // Fecha o menu ao clicar fora.
@@ -147,7 +161,8 @@ export default function AnswerForm({
     }
   };
 
-  const showMenu = menuOpen && canAnswer && suggestions.length > 0;
+  const showMenu =
+    menuOpen && canAnswer && suggestions.length > 0 && debounced.trim() !== "";
 
   return (
     <form
@@ -220,7 +235,7 @@ export default function AnswerForm({
               ))}
             </div>
           )}
-          {menuOpen && canAnswer && suggestions.length === 0 && value.trim() !== "" && (
+          {menuOpen && canAnswer && suggestions.length === 0 && debounced.trim() !== "" && (
             <div className="suggest-menu">
               <p className="suggest-empty">
                 Nada no catálogo com esse texto — pode enviar assim mesmo (Enter).

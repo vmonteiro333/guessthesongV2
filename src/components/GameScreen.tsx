@@ -83,6 +83,8 @@ export default function GameScreen({
           onClose={() => setModalDismissed(true)}
           onNext={game.nextSong}
           isLastRound={isLastRound}
+          brokenCombo={game.lastBrokenCombo}
+          streakAfter={game.streak}
         />
       )}
 
