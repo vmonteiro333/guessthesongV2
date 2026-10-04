@@ -1842,3 +1842,55 @@
 .gameover-highlight strong {
   color: var(--accent);
 }
+
+/* ===== Badge de combo na modal ===== */
+.combo-note {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
+.combo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  animation: combo-pop 0.45s var(--ease) both;
+}
+
+.combo-badge--fire {
+  border: 1px solid rgba(255, 122, 89, 0.5);
+  background: rgba(255, 122, 89, 0.12);
+  color: #ffb59d;
+  box-shadow: 0 0 26px rgba(255, 122, 89, 0.25);
+}
+
+.combo-badge--broken {
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--error);
+}
+
+@keyframes combo-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.combo-flame {
+  display: inline-block;
+  animation: flame-flicker 1.1s ease-in-out infinite;
+}
