@@ -104,6 +104,7 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
           saveSelectedModeId(id);
         }}
         onStart={game.startGame}
+        onChoosePlaylist={onChoosePlaylist}
       />
     );
   } else if (gameStatus === "game_over") {
@@ -142,7 +143,8 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
           onExit={onChoosePlaylist}
         />
       )}
-      <main className="app-main">{screen}</main>
-    </div>
+      <main className={gameStatus === "idle" ? "app-main app-main--wide" : "app-main"}>
+        {screen}
+      </main>    </div>
   );
 }
