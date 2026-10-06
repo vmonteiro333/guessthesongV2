@@ -1894,3 +1894,33 @@
   display: inline-block;
   animation: flame-flicker 1.1s ease-in-out infinite;
 }
+
+/* ===== Descrição da playlist ===== */
+.picker-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.picker-description {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;   /* máx. 2 linhas, com reticências */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.picker-item:hover .picker-description {
+  color: var(--text-secondary);
+}
+
+.start-playlist-description {
+  margin: -6px 0 18px;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  font-style: italic;
+}

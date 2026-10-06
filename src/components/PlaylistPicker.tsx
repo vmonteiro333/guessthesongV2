@@ -27,7 +27,12 @@ export default function PlaylistPicker({ playlists, onSelect }: PlaylistPickerPr
           >
             <PlaylistCover playlist={playlist} />
             <span className="picker-item-body">
-              <span className="picker-name">{playlist.name}</span>
+              <span className="picker-text">
+                <span className="picker-name">{playlist.name}</span>
+                {playlist.description && (
+                  <span className="picker-description">{playlist.description}</span>
+                )}
+              </span>
               <span className="picker-count">
                 {playlist.songs.length} música{playlist.songs.length === 1 ? "" : "s"}
               </span>
@@ -37,7 +42,7 @@ export default function PlaylistPicker({ playlists, onSelect }: PlaylistPickerPr
       </div>
 
       <p className="start-footnote">
-        Para adicionar mais: <code>node scripts/convert-csv.mjs playlist.csv "Nome"</code>
+        Para adicionar mais: <code>node scripts/convert-csv.mjs playlist.csv "Nome" "Descrição"</code>
       </p>
     </section>
   );

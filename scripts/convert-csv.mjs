@@ -12,6 +12,7 @@ const playlistsDir = resolve(root, "src/data/playlists");
 
 const csvPath = process.argv[2] ?? "";
 const displayName = (process.argv[3] ?? "").trim();
+const description = (process.argv[4] ?? "").trim();
 
 if (!csvPath) {
   console.error('Uso: node scripts/convert-csv.mjs playlist.csv "Nome da Playlist"');
@@ -174,6 +175,7 @@ const lines = [
   "export const playlist: Playlist = {",
   "  id: " + JSON.stringify(slug) + ",",
   "  name: " + JSON.stringify(name) + ",",
+  ...(description ? ["  description: " + JSON.stringify(description) + ","] : []),
   "  cover: " + JSON.stringify("/playlists/" + slug + ".jpg") + ",",
   "  songs: [",
 ];

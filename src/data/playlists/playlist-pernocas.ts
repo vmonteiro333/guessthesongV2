@@ -6,6 +6,7 @@ export const playlist: Playlist = {
   id: "playlist-pernocas",
   name: "Playlist Pernocas",
   cover: "/playlists/playlist-pernocas.png",
+  description: "",
   songs: [
   {
     id: "song-001",

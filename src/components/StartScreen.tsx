@@ -20,6 +20,9 @@ export default function StartScreen({ playlist, onStart, onChoosePlaylist }: Sta
       <p className="start-kicker">
         {playlist.name} — {playlist.songs.length} músicas
       </p>
+      {playlist.description && (
+        <p className="start-playlist-description">{playlist.description}</p>
+      )}
       <h2 id="start-title" className="start-title">
         Qual é a música?
       </h2>
