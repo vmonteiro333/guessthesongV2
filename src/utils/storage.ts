@@ -38,3 +38,27 @@ export function saveSelectedPlaylistId(id: string): void {
     /* noop */
   }
 }
+
+import type { GameModeId } from "../types/gameMode";
+
+const MODE_KEY = "guessthesong:selected-mode";
+
+export function loadSelectedModeId(): GameModeId | null {
+  try {
+    const raw = window.localStorage.getItem(MODE_KEY);
+    if (raw === "classic" || raw === "blitz" || raw === "hardcore" || raw === "daily") {
+      return raw;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSelectedModeId(id: GameModeId): void {
+  try {
+    window.localStorage.setItem(MODE_KEY, id);
+  } catch {
+    /* noop */
+  }
+}

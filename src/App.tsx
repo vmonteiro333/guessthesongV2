@@ -14,6 +14,8 @@ import SpotifyConnect from "./components/SpotifyConnect";
 import PlaylistPicker from "./components/PlaylistPicker";
 import { loadSelectedPlaylistId, saveSelectedPlaylistId } from "./utils/storage";
 import Ribbons from "./components/Ribbons";
+import type { GameModeId } from "./types/gameMode";
+import { loadSelectedModeId, saveSelectedModeId } from "./utils/storage";
 
 function findPlaylist(id: string | null): Playlist | null {
   if (!id) return null;
@@ -84,7 +86,8 @@ interface GameProps {
 
 function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
   const game = useGame(audio, playlist);
-  const [drawerOpen, setDrawerOpen] = useState(false);   // ← voltou (dono do estado)
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [modeId, setModeId] = useState<GameModeId>(() => loadSelectedModeId() ?? "classic");
   const { gameStatus } = game;
 
   const showHeader = gameStatus !== "idle" && gameStatus !== "game_over";
@@ -95,11 +98,16 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
     screen = (
       <StartScreen
         playlist={playlist}
+        modeId={modeId}
+        onChangeMode={(id) => {
+          setModeId(id);
+          saveSelectedModeId(id);
+        }}
         onStart={game.startGame}
-        onChoosePlaylist={onChoosePlaylist}
       />
     );
   } else if (gameStatus === "game_over") {
+    // ... GameOver como já está (com onChoosePlaylist)
     screen = (
         <GameOver
           score={game.score}
