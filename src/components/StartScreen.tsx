@@ -2,15 +2,20 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { assetUrl } from "../config/assets";
 import type { Playlist } from "../types/playlist";
 import type { GameModeId } from "../types/gameMode";
+import type { DifficultyId } from "../types/difficulty";
 import { getGameMode } from "../data/gameModes";
+import { getDifficulty } from "../data/difficulties";
 import { STAGES, formatSeconds } from "../utils/gameRules";
 import ModePicker from "./ModePicker";
+import DifficultyPicker from "./DifficultyPicker";
 import { NoteIcon, PlayIcon } from "./icons";
 
 interface StartScreenProps {
   playlist: Playlist;
   modeId: GameModeId;
   onChangeMode: (id: GameModeId) => void;
+  difficultyId: DifficultyId;
+  onChangeDifficulty: (id: DifficultyId) => void;
   onStart: () => void;
   onChoosePlaylist: () => void;
 }
@@ -19,11 +24,15 @@ export default function StartScreen({
   playlist,
   modeId,
   onChangeMode,
+  difficultyId,
+  onChangeDifficulty,
   onStart,
   onChoosePlaylist,
 }: StartScreenProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [diffPickerOpen, setDiffPickerOpen] = useState(false);
   const mode = getGameMode(modeId);
+  const difficulty = getDifficulty(difficultyId);
   const ctaRef = useRef<HTMLButtonElement>(null);
   const empty = playlist.songs.length === 0;
 
@@ -88,6 +97,20 @@ export default function StartScreen({
             ▾
           </span>
         </button>
+
+        <button
+          type="button"
+          className="mode-pill"
+          onClick={() => setDiffPickerOpen(true)}
+          aria-haspopup="dialog"
+          aria-label={`Dificuldade: ${difficulty.name}. Abrir seletor de dificuldades`}
+        >
+          <span className="mode-pill-label">DIFICULDADE</span>
+          <span className="mode-pill-value">{difficulty.name}</span>
+          <span className="mode-pill-chevron" aria-hidden="true">
+            ▾
+          </span>
+        </button>
       </aside>
 
       <div
@@ -141,6 +164,13 @@ export default function StartScreen({
         selectedId={mode.id}
         onSelect={onChangeMode}
         onClose={() => setPickerOpen(false)}
+      />
+
+      <DifficultyPicker
+        open={diffPickerOpen}
+        selectedId={difficulty.id}
+        onSelect={onChangeDifficulty}
+        onClose={() => setDiffPickerOpen(false)}
       />
     </section>
   );

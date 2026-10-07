@@ -8,6 +8,10 @@ interface NowPlayingPanelProps {
   phase: SnippetPhase;
   song: { title: string; artist: string } | null;
   streak: number;
+  /** Dica revelada: nome do artista (só na dificuldade Fácil). */
+  hintArtist: string | null;
+  /** Dica revelada: URL da capa do álbum (só na dificuldade Fácil). */
+  hintCoverUrl: string | null;
 }
 
 export default function NowPlayingPanel({
@@ -16,6 +20,8 @@ export default function NowPlayingPanel({
   phase,
   song,
   streak,
+  hintArtist,
+  hintCoverUrl,
 }: NowPlayingPanelProps) {
   return (
     <section
@@ -29,13 +35,19 @@ export default function NowPlayingPanel({
           </span>
           <p className="np-title">Escute com atenção</p>
           <AudioViz phase={phase} />
+          {hintCoverUrl && (
+            <img
+              className="np-hint-cover"
+              src={hintCoverUrl}
+              alt="Capa do álbum (dica parcialmente desfocada)"
+            />
+          )}
+          {hintArtist && <p className="np-hint">DICA · Artista: {hintArtist}</p>}
           <p className="np-sub">
             {phase === "buffering" ? (
               "Preparando o áudio…"
             ) : playing ? (
-              <span className="np-playing">
-                Tocando trecho…
-              </span>
+              <span className="np-playing">Tocando trecho…</span>
             ) : (
               "Responda ou pule para revelar"
             )}

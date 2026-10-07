@@ -62,3 +62,33 @@ export function saveSelectedModeId(id: GameModeId): void {
     /* noop */
   }
 }
+
+import type { DifficultyId } from "../types/difficulty";
+
+const DIFFICULTY_KEY = "guessthesong:selected-difficulty";
+
+export function loadSelectedDifficultyId(): DifficultyId | null {
+  try {
+    const raw = window.localStorage.getItem(DIFFICULTY_KEY);
+    if (
+      raw === "easy" ||
+      raw === "normal" ||
+      raw === "hard" ||
+      raw === "very-hard" ||
+      raw === "hardcore"
+    ) {
+      return raw;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSelectedDifficultyId(id: DifficultyId): void {
+  try {
+    window.localStorage.setItem(DIFFICULTY_KEY, id);
+  } catch {
+    /* noop */
+  }
+}

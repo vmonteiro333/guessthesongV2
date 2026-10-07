@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Playlist } from "../types/playlist";
 import type { Song } from "../types/song";
 import type { GameStatus, SongRoundResult } from "../types/game";
-import { getStageSeconds, isLastStage, STAGES } from "../utils/gameRules";
+import type { Difficulty } from "../types/difficulty";
 import { computeRoundPoints } from "../utils/score";
 import { evaluateGuess } from "../utils/compareAnswer";
 import { normalizeText } from "../utils/normalizeText";
@@ -45,6 +45,9 @@ export interface UseGameResult {
   activeResult: SongRoundResult | null;
   maxStreak: number;
   lastBrokenCombo: number;
+  stages: number[];
+  hints: { artist: boolean; cover: boolean };
+  revealHint: (kind: "artist" | "cover") => void;
   startGame: () => void;
   listen: () => void;
   skip: () => void;
@@ -57,7 +60,7 @@ export interface UseGameResult {
  * Estado central do jogo. Não executa NENHUMA chamada direta às APIs de
  * áudio: toda a reprodução passa por useAudio.
  */
-export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResult {
+export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: Difficulty): UseGameResult {
   const [gameStatus, setGameStatus] = useState<GameStatus>("idle");
   const [queue, setQueue] = useState<Song[]>([]);
   const [currentSongIndex, setCurrentSongIndex] = useState(0);
@@ -71,6 +74,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
   const [maxStreak, setMaxStreak] = useState(0);
   const [lastBrokenCombo, setLastBrokenCombo] = useState(0);
   const streakRef = useRef(0);
+  const stages = difficulty.stages;
 
   /** Estado da rodada em andamento (artista descoberto antes do título). */
   const roundRef = useRef<{ artistCorrect: boolean; artistAtStage: number | null }>({
@@ -100,6 +104,21 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
       if (advanceTimerRef.current !== 0) window.clearTimeout(advanceTimerRef.current);
     };
   }, []);
+
+  const [hints, setHints] = useState<{ artist: boolean; cover: boolean }>({
+    artist: false,
+    cover: false,
+  });
+
+  const revealHint = useCallback(
+    (kind: "artist" | "cover") => {
+      if (!difficulty.allowHints) return;
+      // Decisão documentada: dica NÃO marca artistCorrect/artistAtStage —
+      // pontos parciais continuam vindo só de PALPITE (score intocado).
+      setHints((prev) => (prev[kind] ? prev : { ...prev, [kind]: true }));
+    },
+    [difficulty.allowHints]
+  );
 
   /** UMA entrada por música (atualizável) — nunca cards duplicados. */
   const upsertHistory = useCallback((song: Song, patch: Partial<SongRoundResult>): void => {
@@ -197,6 +216,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     setStageIndex(0);
     setAnswer({ artist: "", title: "" });
     setFeedback(null);
+    setHints({ artist: false, cover: false });
     loadSeqRef.current += 1;
     const token = loadSeqRef.current;
     void loadCurrentSong(queue[next], token);
@@ -215,12 +235,12 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     const shuffled = shuffle(playlist.songs);                   // ← mudou (era shuffle(catalog))
     roundRef.current = { artistCorrect: false, artistAtStage: null };
     playTokenRef.current += 1;
+    setHints({ artist: false, cover: false });
     setQueue(shuffled);
     setCurrentSongIndex(0);
     setStageIndex(0);
     setAnswer({ artist: "", title: "" });
     setScore(0);
-    setStreak(0);
     setHistory([]);
     setFeedback(null);
     streakRef.current = 0;
@@ -243,7 +263,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     setFeedback(null);
     setGameStatus("playing");
     try {
-      const result = await audio.playSnippet(STAGES[stageIndex]);
+      const result = await audio.playSnippet(stages[stageIndex]); 
       if (token !== playTokenRef.current) return; // skip/restart invalidou
       if (result === "completed") {
         setGameStatus("waiting_answer");
@@ -290,7 +310,8 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
         const nextStreak = streakRef.current + 1;
         streakRef.current = nextStreak;
         setStreak(nextStreak);
-        setMaxStreak((m) => Math.max(m, nextStreak));        setFeedback({
+        setMaxStreak((m) => Math.max(m, nextStreak));
+        setFeedback({
           kind: "correct",
           message: `Acertou! ${song.artist} — ${song.title}`,
           detail: `+${points} ponto${points === 1 ? "" : "s"}`,
@@ -298,7 +319,8 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
       } else {
         setLastBrokenCombo(streakRef.current >= 2 ? streakRef.current : 0);
         streakRef.current = 0;
-        setStreak(0);        setFeedback({
+        setStreak(0);        
+        setFeedback({
           kind: "round_failed",
           message: `Fim da rodada. A música era ${song.artist} — ${song.title}.`,
           detail:
@@ -324,13 +346,13 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     audio.stopPlayback();
     playTokenRef.current += 1;
 
-    if (isLastStage(stageIndex)) {
+    if (stageIndex >= stages.length - 1) {
       // Último estágio: SKIP = "não sei" → encerra a rodada.
       finalizeRound(false);
       return;
     }
 
-    setStageIndex((prev) => Math.min(prev + 1, STAGES.length - 1));
+    setStageIndex((prev) => Math.min(prev + 1, stages.length - 1));
     setAnswer({ artist: "", title: "" });
     setFeedback(null);
     setGameStatus("ready");
@@ -373,7 +395,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
       return; // permanece em waiting_answer
     }
 
-    if (isLastStage(stageIndex)) {
+    if (stageIndex >= stages.length - 1) {
       finalizeRound(false);
       return;
     }
@@ -399,8 +421,11 @@ export function useGame(audio: UseAudioResult, playlist: Playlist): UseGameResul
     currentSong,
     currentSongIndex,
     stageIndex,
-    stageSeconds: getStageSeconds(stageIndex),
-    isLastStage: isLastStage(stageIndex),
+    stageSeconds: stages[stageIndex] ?? stages[0] ?? 0.1,
+    isLastStage: stageIndex >= stages.length - 1,
+    stages,
+    hints,
+    revealHint,
     answer,
     feedback,
     score,

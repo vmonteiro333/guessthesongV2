@@ -7,6 +7,8 @@ interface AnswerFormProps {
   value: string;
   /** Catálogo da playlist (para as sugestões). */
   catalog: Song[];
+  /** Autocomplete também encontra músicas pelo nome do artista? */
+  allowArtistSearch: boolean;
   onChange: (value: string) => void;
   onSubmit: () => void;
   onSkip: () => void;
@@ -23,20 +25,24 @@ interface Suggestion {
 }
 
 /** Busca determinística por título OU artista (prefixo e substring). */
-function buildSuggestions(query: string, catalog: Song[], excludeId?: string): Suggestion[] {
+function buildSuggestions(
+  query: string,
+  catalog: Song[],
+  allowArtistSearch: boolean
+): Suggestion[] {
   const q = normalizeText(query);
   if (q.length === 0) return [];
   const out: Suggestion[] = [];
   const seen = new Set<string>();
   for (const song of catalog) {
-    if (song.id === excludeId) continue;
     const title = normalizeText(song.title);
     const artist = normalizeText(song.artist);
     let matchLabel: string | null = null;
     if (title === q) matchLabel = "música";
     else if (title.startsWith(q)) matchLabel = "música";
-    else if (artist === q || artist.includes(q)) matchLabel = song.artist.split(",")[0].trim();
-    else {
+    else if (allowArtistSearch && (artist === q || artist.includes(q)))
+      matchLabel = song.artist.split(",")[0].trim();
+    else if (allowArtistSearch) {
       for (const alias of song.artistAliases ?? []) {
         const a = normalizeText(alias);
         if (a === q || a.includes(q)) {
@@ -63,6 +69,7 @@ function buildSuggestions(query: string, catalog: Song[], excludeId?: string): S
 export default function AnswerForm({
   value,
   catalog,
+  allowArtistSearch,
   onChange,
   onSubmit,
   onSkip,
@@ -72,7 +79,7 @@ export default function AnswerForm({
   isLastStage,
 }: AnswerFormProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-    // Debounce: sugestões só após 350ms parado + mínimo de 3 caracteres.
+  // Debounce: sugestões só após 350ms parado + mínimo de 3 caracteres.
   // Equilíbrio: a lista continua ajudando quem JÁ sabe o que procura,
   // mas deixa de ser "resposta de graça" por digitação mínima.
   const [debounced, setDebounced] = useState("");
@@ -92,8 +99,8 @@ export default function AnswerForm({
   }, [value]);
 
   const suggestions = useMemo(
-    () => buildSuggestions(debounced, catalog),
-    [debounced, catalog]
+    () => buildSuggestions(debounced, catalog, allowArtistSearch),
+    [debounced, catalog, allowArtistSearch]
   );
 
   // Fecha o menu ao clicar fora.
@@ -185,7 +192,11 @@ export default function AnswerForm({
             type="text"
             className="suggest-input"
             value={value}
-            placeholder="Digite a música ou o artista…"
+            placeholder={
+              allowArtistSearch
+                ? "Digite a música ou o artista…"
+                : "Digite o nome da música…"
+            }
             autoComplete="off"
             spellCheck={false}
             disabled={!canType}

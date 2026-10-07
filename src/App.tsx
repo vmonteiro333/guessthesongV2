@@ -3,7 +3,10 @@ import type { ReactNode } from "react";
 import { useGame } from "./hooks/useGame";
 import { useAudio } from "./hooks/useAudio";
 import type { Playlist } from "./types/playlist";
+import type { GameModeId } from "./types/gameMode";
+import type { DifficultyId } from "./types/difficulty";
 import { playlists } from "./data/playlists";
+import { getDifficulty } from "./data/difficulties";
 import GameHeader from "./components/GameHeader";
 import GameScreen from "./components/GameScreen";
 import GameOver from "./components/GameOver";
@@ -12,10 +15,10 @@ import EmptyState from "./components/EmptyState";
 import LoadingState from "./components/LoadingState";
 import SpotifyConnect from "./components/SpotifyConnect";
 import PlaylistPicker from "./components/PlaylistPicker";
-import { loadSelectedPlaylistId, saveSelectedPlaylistId } from "./utils/storage";
 import Ribbons from "./components/Ribbons";
-import type { GameModeId } from "./types/gameMode";
+import { loadSelectedPlaylistId, saveSelectedPlaylistId } from "./utils/storage";
 import { loadSelectedModeId, saveSelectedModeId } from "./utils/storage";
+import { loadSelectedDifficultyId, saveSelectedDifficultyId } from "./utils/storage";
 
 function findPlaylist(id: string | null): Playlist | null {
   if (!id) return null;
@@ -29,6 +32,7 @@ export default function App() {
   );
 
   const choosePlaylist = (playlist: Playlist): void => {
+    audio.stopPlayback();
     setSelected(playlist);
     saveSelectedPlaylistId(playlist.id);
   };
@@ -78,6 +82,7 @@ export default function App() {
     </div>
   );
 }
+
 interface GameProps {
   playlist: Playlist;
   audio: ReturnType<typeof useAudio>;
@@ -85,9 +90,13 @@ interface GameProps {
 }
 
 function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
-  const game = useGame(audio, playlist);
+  const game = useGame(audio, playlist, getDifficulty(loadSelectedDifficultyId()));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [modeId, setModeId] = useState<GameModeId>(() => loadSelectedModeId() ?? "classic");
+  const [difficultyId, setDifficultyId] = useState<DifficultyId>(
+    () => loadSelectedDifficultyId() ?? "normal"
+  );
+  const difficulty = getDifficulty(difficultyId);
   const { gameStatus } = game;
 
   const showHeader = gameStatus !== "idle" && gameStatus !== "game_over";
@@ -103,21 +112,25 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
           setModeId(id);
           saveSelectedModeId(id);
         }}
+        difficultyId={difficultyId}
+        onChangeDifficulty={(id) => {
+          setDifficultyId(id);
+          saveSelectedDifficultyId(id);
+        }}
         onStart={game.startGame}
         onChoosePlaylist={onChoosePlaylist}
       />
     );
   } else if (gameStatus === "game_over") {
-    // ... GameOver como já está (com onChoosePlaylist)
     screen = (
-        <GameOver
-          score={game.score}
-          history={game.history}
-          playlistName={playlist.name}
-          maxStreak={game.maxStreak}
-          onRestart={game.startGame}
-          onChoosePlaylist={onChoosePlaylist}
-        />
+      <GameOver
+        score={game.score}
+        history={game.history}
+        playlistName={playlist.name}
+        maxStreak={game.maxStreak}
+        onRestart={game.startGame}
+        onChoosePlaylist={onChoosePlaylist}
+      />
     );
   } else {
     screen = (
@@ -125,8 +138,9 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
         game={game}
         audio={audio}
         catalog={playlist.songs}
-        resultsOpen={drawerOpen}                      // ← nova prop
-        onCloseResults={() => setDrawerOpen(false)}   // ← nova prop
+        difficulty={difficulty}
+        resultsOpen={drawerOpen}
+        onCloseResults={() => setDrawerOpen(false)}
       />
     );
   }
@@ -145,6 +159,7 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
       )}
       <main className={gameStatus === "idle" ? "app-main app-main--wide" : "app-main"}>
         {screen}
-      </main>    </div>
+      </main>
+    </div>
   );
 }

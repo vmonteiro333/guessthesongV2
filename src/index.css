@@ -507,25 +507,6 @@
     color: var(--accent);
   }
   
-  .start-rules {
-    list-style: none;
-    margin: 0 auto 26px;
-    padding: 0;
-    max-width: 48ch;
-    text-align: left;
-    display: flex;
-    flex-direction: column;
-    gap: 9px;
-  }
-  
-  .start-rules li {
-    padding-left: 22px;
-    position: relative;
-    color: var(--text-secondary);
-    line-height: 1.5;
-    font-size: 0.92rem;
-  }
-  
   .start-rules li::before {
     content: "";
     position: absolute;
@@ -1926,63 +1907,11 @@
 }
 
 /* ===== Modo de jogo ===== */
-.mode-trigger {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  margin: 0 0 10px;
-  padding: 15px 18px;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  backdrop-filter: blur(12px);
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease);
-  animation: rise 0.4s var(--ease) both;
-}
 
 .mode-trigger:hover {
   border-color: rgba(0, 230, 118, 0.5);
   box-shadow: 0 0 28px var(--accent-glow);
   transform: translateY(-1px);
-}
-
-.mode-trigger-label {
-  font-size: 0.64rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.22em;
-  color: var(--text-muted);
-}
-
-.mode-trigger-value {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  font-family: var(--font-display);
-  font-weight: 800;
-  font-size: 1.2rem;
-}
-
-.mode-trigger-icon {
-  color: var(--accent);
-}
-
-.mode-trigger-chevron {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.mode-description {
-  margin: -2px 0 30px;
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-  text-align: center;
 }
 
 .mode-list {
@@ -2333,5 +2262,138 @@
 
   .home-tagline {
     text-align: center;
+  }
+}
+
+/* ===== Dificuldade: dicas ===== */
+.hint-wrap {
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.hint-btn {
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 0 20px;
+  font-size: 0.85rem;
+}
+
+.hint-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  z-index: 30;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--surface-2);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+  animation: rise 0.16s var(--ease) both;
+}
+
+.hint-menu-item {
+  text-align: left;
+  padding: 11px 13px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.hint-menu-item:hover:not(:disabled) {
+  background: rgba(0, 230, 118, 0.13);
+}
+
+.hint-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.np-hint {
+  margin: 8px 0 0;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--accent);
+}
+
+.np-hint-cover {
+  width: 132px;
+  height: 132px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  margin-top: 10px;
+  filter: blur(8px) saturate(1.2);
+  transform: scale(1.06);
+  border: 1px solid var(--border-strong);
+}
+
+.mode-item-stages {
+  font-size: 0.74rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ===== Dificuldades com cor ===== */
+.mode-item--diff .mode-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--diff-color);
+  box-shadow: 0 0 10px var(--diff-color);
+  flex-shrink: 0;
+}
+
+.mode-item--diff .mode-check {
+  color: var(--diff-color);
+}
+
+.mode-item--diff .mode-item-stages {
+  color: var(--diff-color);
+}
+
+.mode-item--diff.mode-item--selected {
+  border-color: var(--diff-color);
+}
+
+.mode-item--diff.mode-item--selected:hover {
+  border-color: var(--diff-color);
+}
+
+/* ===== "Última chance" centralizada no card ===== */
+.stage-critical-tag {
+  position: absolute;
+  top: clamp(18px, 3.5vw, 26px);
+  left: 50%;
+  transform: translateX(-50%);
+  margin-left: 0; /* substitui o margin-left: auto antigo */
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--error);
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.1);
+  border-radius: 999px;
+  padding: 4px 11px;
+  animation: critical-pulse 1.4s ease-in-out infinite;
+  white-space: nowrap;
+}
+
+@keyframes critical-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(248, 113, 113, 0.45);
   }
 }
