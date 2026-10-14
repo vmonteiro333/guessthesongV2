@@ -1643,19 +1643,6 @@
 }
 
 /* ===== Gameplay: escada de valor, crítica, hero button ===== */
-.stage-critical-tag {
-  margin-left: auto;
-  font-size: 0.68rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--error);
-  border: 1px solid rgba(248, 113, 113, 0.45);
-  background: rgba(248, 113, 113, 0.1);
-  border-radius: 999px;
-  padding: 4px 11px;
-  animation: step-pulse 1.4s ease-in-out infinite;
-}
 
 .stage--critical {
   border-color: rgba(248, 113, 113, 0.35);
