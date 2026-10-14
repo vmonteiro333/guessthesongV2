@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useGame } from "./hooks/useGame";
 import { useAudio } from "./hooks/useAudio";
 import type { Playlist } from "./types/playlist";
 import type { GameModeId } from "./types/gameMode";
-import type { DifficultyId } from "./types/difficulty";
+import type { DifficultySelection } from "./types/difficulty";
 import { playlists } from "./data/playlists";
 import { getDifficulty } from "./data/difficulties";
+import { getPopularityFilter } from "./data/popularityFilters";
+import { filterByPopularity } from "./utils/popularity";
 import GameHeader from "./components/GameHeader";
 import GameScreen from "./components/GameScreen";
 import GameOver from "./components/GameOver";
@@ -16,9 +18,14 @@ import LoadingState from "./components/LoadingState";
 import SpotifyConnect from "./components/SpotifyConnect";
 import PlaylistPicker from "./components/PlaylistPicker";
 import Ribbons from "./components/Ribbons";
-import { loadSelectedPlaylistId, saveSelectedPlaylistId } from "./utils/storage";
-import { loadSelectedModeId, saveSelectedModeId } from "./utils/storage";
-import { loadSelectedDifficultyId, saveSelectedDifficultyId } from "./utils/storage";
+import {
+  loadSelectedPlaylistId,
+  saveSelectedPlaylistId,
+  loadSelectedModeId,
+  saveSelectedModeId,
+  loadDifficultySelection,
+  saveDifficultySelection,
+} from "./utils/storage";
 
 function findPlaylist(id: string | null): Playlist | null {
   if (!id) return null;
@@ -90,13 +97,32 @@ interface GameProps {
 }
 
 function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
-  const game = useGame(audio, playlist, getDifficulty(loadSelectedDifficultyId()));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [modeId, setModeId] = useState<GameModeId>(() => loadSelectedModeId() ?? "classic");
-  const [difficultyId, setDifficultyId] = useState<DifficultyId>(
-    () => loadSelectedDifficultyId() ?? "normal"
+  const [selection, setSelection] = useState<DifficultySelection>(() =>
+    loadDifficultySelection()
   );
-  const difficulty = getDifficulty(difficultyId);
+
+  /**
+   * Pool efetivo da partida: a dimensão POPULARIDADE filtra as músicas
+   * (percentis por streams). Enquanto os filtros estão "EM BREVE", o toggle
+   * fica desabilitado e o pool é sempre o completo.
+   */
+  const effectivePlaylist = useMemo<Playlist>(() => {
+    if (!selection.popularity.enabled || selection.popularity.filterId === null) {
+      return playlist;
+    }
+    const filter = getPopularityFilter(selection.popularity.filterId);
+    if (!filter) return playlist;
+    return { ...playlist, songs: filterByPopularity(playlist.songs, filter) };
+  }, [playlist, selection]);
+
+  const effectiveDifficulty = useMemo(
+    () => (selection.time.enabled ? getDifficulty(selection.time.difficultyId) : getDifficulty("normal")),
+    [selection]
+  );
+
+  const game = useGame(audio, effectivePlaylist, effectiveDifficulty);
   const { gameStatus } = game;
 
   const showHeader = gameStatus !== "idle" && gameStatus !== "game_over";
@@ -112,10 +138,10 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
           setModeId(id);
           saveSelectedModeId(id);
         }}
-        difficultyId={difficultyId}
-        onChangeDifficulty={(id) => {
-          setDifficultyId(id);
-          saveSelectedDifficultyId(id);
+        selection={selection}
+        onChangeSelection={(next) => {
+          setSelection(next);
+          saveDifficultySelection(next);
         }}
         onStart={game.startGame}
         onChoosePlaylist={onChoosePlaylist}
@@ -137,8 +163,8 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
       <GameScreen
         game={game}
         audio={audio}
-        catalog={playlist.songs}
-        difficulty={difficulty}
+        catalog={effectivePlaylist.songs}
+        difficulty={effectiveDifficulty}
         resultsOpen={drawerOpen}
         onCloseResults={() => setDrawerOpen(false)}
       />

@@ -1,3 +1,7 @@
+import type { GameModeId } from "../types/gameMode";
+import type { DifficultyId, DifficultySelection } from "../types/difficulty";
+import { DEFAULT_DIFFICULTY_SELECTION } from "../types/difficulty";
+
 const BEST_SCORE_KEY = "guessthesong:best-score";
 
 /** Recorde pessoal (best-effort; localStorage pode estar indisponível). */
@@ -39,8 +43,6 @@ export function saveSelectedPlaylistId(id: string): void {
   }
 }
 
-import type { GameModeId } from "../types/gameMode";
-
 const MODE_KEY = "guessthesong:selected-mode";
 
 export function loadSelectedModeId(): GameModeId | null {
@@ -63,31 +65,61 @@ export function saveSelectedModeId(id: GameModeId): void {
   }
 }
 
-import type { DifficultyId } from "../types/difficulty";
+// ==================== Seleção de dificuldade (combinada) ====================
 
-const DIFFICULTY_KEY = "guessthesong:selected-difficulty";
+const SELECTION_KEY = "guessthesong:difficulty-selection";
+const LEGACY_DIFFICULTY_KEY = "guessthesong:selected-difficulty";
 
-export function loadSelectedDifficultyId(): DifficultyId | null {
-  try {
-    const raw = window.localStorage.getItem(DIFFICULTY_KEY);
-    if (
-      raw === "easy" ||
-      raw === "normal" ||
-      raw === "hard" ||
-      raw === "very-hard" ||
-      raw === "hardcore"
-    ) {
-      return raw;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+const TIME_IDS: DifficultyId[] = ["easy", "normal", "hard", "very-hard", "hardcore"];
+
+function isValidSelection(value: unknown): value is DifficultySelection {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as DifficultySelection;
+  return (
+    typeof v.time === "object" &&
+    v.time !== null &&
+    typeof v.time.enabled === "boolean" &&
+    TIME_IDS.includes(v.time.difficultyId) &&
+    typeof v.popularity === "object" &&
+    v.popularity !== null &&
+    typeof v.popularity.enabled === "boolean"
+  );
 }
 
-export function saveSelectedDifficultyId(id: DifficultyId): void {
+/**
+ * Seleção combinada (tempo + popularidade). Migra automaticamente da chave
+ * antiga (só-tempo) para o novo formato.
+ */
+export function loadDifficultySelection(): DifficultySelection {
   try {
-    window.localStorage.setItem(DIFFICULTY_KEY, id);
+    const raw = window.localStorage.getItem(SELECTION_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (isValidSelection(parsed)) return parsed;
+    }
+    // Migração da chave antiga
+    const legacy = window.localStorage.getItem(LEGACY_DIFFICULTY_KEY);
+    if (
+      legacy === "easy" ||
+      legacy === "normal" ||
+      legacy === "hard" ||
+      legacy === "very-hard" ||
+      legacy === "hardcore"
+    ) {
+      return {
+        time: { enabled: true, difficultyId: legacy },
+        popularity: { enabled: false, filterId: null },
+      };
+    }
+  } catch {
+    /* noop */
+  }
+  return DEFAULT_DIFFICULTY_SELECTION;
+}
+
+export function saveDifficultySelection(selection: DifficultySelection): void {
+  try {
+    window.localStorage.setItem(SELECTION_KEY, JSON.stringify(selection));
   } catch {
     /* noop */
   }

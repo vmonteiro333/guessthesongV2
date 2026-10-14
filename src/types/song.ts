@@ -4,7 +4,9 @@ export interface Song {
   artist: string;
   /** Opcional: outras formas do artista que também devem ser aceitas. */
   artistAliases?: string[];
-  /** Link da faixa: https://open.spotify.com/track/... (prévia de 30s via embed). */
+  /** Link da faixa: https://open.spotify.com/track/... */
   spotifyUrl: string;
+  /** Streams totais da faixa (alimenta o filtro de popularidade). */
+  streams?: number;
   coverUrl?: string;
 }

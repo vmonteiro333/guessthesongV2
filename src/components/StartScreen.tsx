@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { assetUrl } from "../config/assets";
 import type { Playlist } from "../types/playlist";
 import type { GameModeId } from "../types/gameMode";
-import type { DifficultyId } from "../types/difficulty";
+import type { DifficultySelection } from "../types/difficulty";
 import { getGameMode } from "../data/gameModes";
 import { getDifficulty } from "../data/difficulties";
 import { STAGES, formatSeconds } from "../utils/gameRules";
@@ -14,8 +14,8 @@ interface StartScreenProps {
   playlist: Playlist;
   modeId: GameModeId;
   onChangeMode: (id: GameModeId) => void;
-  difficultyId: DifficultyId;
-  onChangeDifficulty: (id: DifficultyId) => void;
+  selection: DifficultySelection;
+  onChangeSelection: (selection: DifficultySelection) => void;
   onStart: () => void;
   onChoosePlaylist: () => void;
 }
@@ -24,21 +24,24 @@ export default function StartScreen({
   playlist,
   modeId,
   onChangeMode,
-  difficultyId,
-  onChangeDifficulty,
+  selection,
+  onChangeSelection,
   onStart,
   onChoosePlaylist,
 }: StartScreenProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [diffPickerOpen, setDiffPickerOpen] = useState(false);
   const mode = getGameMode(modeId);
-  const difficulty = getDifficulty(difficultyId);
   const ctaRef = useRef<HTMLButtonElement>(null);
   const empty = playlist.songs.length === 0;
 
   useEffect(() => {
     if (!empty) ctaRef.current?.focus();
   }, [empty]);
+
+  const activeDifficulty = selection.time.enabled
+    ? getDifficulty(selection.time.difficultyId)
+    : getDifficulty("normal");
 
   return (
     <section className="home" aria-labelledby="home-title">
@@ -98,19 +101,74 @@ export default function StartScreen({
           </span>
         </button>
 
-        <button
-          type="button"
-          className="mode-pill"
-          onClick={() => setDiffPickerOpen(true)}
-          aria-haspopup="dialog"
-          aria-label={`Dificuldade: ${difficulty.name}. Abrir seletor de dificuldades`}
-        >
-          <span className="mode-pill-label">DIFICULDADE</span>
-          <span className="mode-pill-value">{difficulty.name}</span>
-          <span className="mode-pill-chevron" aria-hidden="true">
-            ▾
-          </span>
-        </button>
+        {/* ===== Aba DIFICULDADE: duas dimensões independentes ===== */}
+        <div className="dim-panel" role="group" aria-label="Dificuldade">
+          {/* Dimensão TEMPO */}
+          <div className="dim-card">
+            <div className="dim-card-head">
+              <span className="dim-card-icon" aria-hidden="true">
+                ⏱
+              </span>
+              <span className="dim-card-name">Tempo</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={selection.time.enabled}
+                aria-label="Ligar ou desligar dificuldade por tempo"
+                className={`dim-switch${selection.time.enabled ? " dim-switch--on" : ""}`}
+                onClick={() =>
+                  onChangeSelection({
+                    ...selection,
+                    time: { ...selection.time, enabled: !selection.time.enabled },
+                  })
+                }
+              >
+                <span className="dim-switch-knob" />
+              </button>
+            </div>
+            {selection.time.enabled ? (
+              <button
+                type="button"
+                className="dim-card-value"
+                onClick={() => setDiffPickerOpen(true)}
+                aria-haspopup="dialog"
+                aria-label={`Dificuldade de tempo: ${activeDifficulty.name}. Abrir seletor`}
+              >
+                {activeDifficulty.name} · {activeDifficulty.stages.length} etapas
+                <span className="dim-chevron" aria-hidden="true">
+                  ▾
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="dim-card-value dim-card-value--muted"
+                onClick={() =>
+                  onChangeSelection({
+                    ...selection,
+                    time: { ...selection.time, enabled: true },
+                  })
+                }
+              >
+                Desligado — toque para ligar
+              </button>
+            )}
+          </div>
+
+          {/* Dimensão POPULARIDADE — EM BREVE (aguarda streams no catálogo) */}
+          <div className="dim-card dim-card--soon">
+            <div className="dim-card-head">
+              <span className="dim-card-icon" aria-hidden="true">
+                🎧
+              </span>
+              <span className="dim-card-name">Popularidade</span>
+              <span className="dim-soon-badge">EM BREVE</span>
+            </div>
+            <p className="dim-card-value dim-card-value--muted dim-soon-text">
+              Filtre por Hits, Meio-termo ou Nicho
+            </p>
+          </div>
+        </div>
       </aside>
 
       <div
@@ -168,8 +226,13 @@ export default function StartScreen({
 
       <DifficultyPicker
         open={diffPickerOpen}
-        selectedId={difficulty.id}
-        onSelect={onChangeDifficulty}
+        selectedId={selection.time.difficultyId}
+        onSelect={(id) =>
+          onChangeSelection({
+            ...selection,
+            time: { ...selection.time, difficultyId: id },
+          })
+        }
         onClose={() => setDiffPickerOpen(false)}
       />
     </section>
