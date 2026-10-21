@@ -67,59 +67,81 @@ export function saveSelectedModeId(id: GameModeId): void {
 
 // ==================== Seleção de dificuldade (combinada) ====================
 
+// ⚠️ TEMPO agora é SEMPRE ativo: o campo `time.enabled` deixou de existir.
+// Seleções salvas no formato antigo (com `time.enabled`) são lidas e
+// migradas automaticamente na carga — ninguém perde a escolha salva.
 const SELECTION_KEY = "guessthesong:difficulty-selection";
 const LEGACY_DIFFICULTY_KEY = "guessthesong:selected-difficulty";
 
 const TIME_IDS: DifficultyId[] = ["easy", "normal", "hard", "very-hard", "hardcore"];
 
-function isValidSelection(value: unknown): value is DifficultySelection {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as DifficultySelection;
-  return (
-    typeof v.time === "object" &&
-    v.time !== null &&
-    typeof v.time.enabled === "boolean" &&
-    TIME_IDS.includes(v.time.difficultyId) &&
-    typeof v.popularity === "object" &&
-    v.popularity !== null &&
-    typeof v.popularity.enabled === "boolean"
-  );
+function isTimeDifficultyId(value: unknown): value is DifficultyId {
+  return typeof value === "string" && (TIME_IDS as string[]).includes(value);
 }
 
 /**
- * Seleção combinada (tempo + popularidade). Migra automaticamente da chave
- * antiga (só-tempo) para o novo formato.
+ * Normaliza qualquer formato já usado pelo jogo para o formato ATUAL:
+ * - atual:  { time: { difficultyId }, popularity: { enabled, filterId } }
+ * - v1:     { time: { enabled, difficultyId }, popularity: { ... } } → `enabled` descartado
+ * - legacy: "very-hard" (string solta da chave antiga)
+ */
+function normalizeSelection(value: unknown): DifficultySelection {
+  const base: DifficultySelection = {
+    time: { difficultyId: DEFAULT_DIFFICULTY_SELECTION.time.difficultyId },
+    popularity: { ...DEFAULT_DIFFICULTY_SELECTION.popularity },
+  };
+
+  if (typeof value === "string") {
+    // Formato bem antigo: só o id da dificuldade de tempo
+    if (isTimeDifficultyId(value)) base.time.difficultyId = value;
+    return base;
+  }
+
+  if (typeof value !== "object" || value === null) return base;
+  const v = value as Record<string, unknown>;
+
+  // ---- tempo: formato novo { difficultyId } ou antigo { enabled, difficultyId } ----
+  const time = (typeof v.time === "object" && v.time !== null ? v.time : v) as Record<string, unknown>;
+  if (isTimeDifficultyId(time.difficultyId)) {
+    base.time.difficultyId = time.difficultyId;
+  }
+
+  // ---- popularidade: mantém o que vier (validado) ----
+  if (typeof v.popularity === "object" && v.popularity !== null) {
+    const pop = v.popularity as Record<string, unknown>;
+    if (typeof pop.enabled === "boolean") {
+      base.popularity.enabled = pop.enabled;
+    }
+    if (typeof pop.filterId === "string") {
+      // id inválido não quebra: getPopularityFilter devolve null e o App usa o pool completo
+      base.popularity.filterId = pop.filterId as DifficultySelection["popularity"]["filterId"];
+    }
+  }
+
+  return base;
+}
+
+/**
+ * Seleção combinada (tempo + popularidade). Migra automaticamente dos
+ * formatos antigos (com `time.enabled` ou só-tempo) para o atual.
  */
 export function loadDifficultySelection(): DifficultySelection {
   try {
     const raw = window.localStorage.getItem(SELECTION_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (isValidSelection(parsed)) return parsed;
-    }
-    // Migração da chave antiga
+    if (raw) return normalizeSelection(JSON.parse(raw));
+
+    // Migração da chave antiga (só-tempo)
     const legacy = window.localStorage.getItem(LEGACY_DIFFICULTY_KEY);
-    if (
-      legacy === "easy" ||
-      legacy === "normal" ||
-      legacy === "hard" ||
-      legacy === "very-hard" ||
-      legacy === "hardcore"
-    ) {
-      return {
-        time: { enabled: true, difficultyId: legacy },
-        popularity: { enabled: false, filterId: null },
-      };
-    }
+    if (legacy) return normalizeSelection(legacy);
   } catch {
     /* noop */
   }
-  return DEFAULT_DIFFICULTY_SELECTION;
+  return normalizeSelection(null);
 }
 
 export function saveDifficultySelection(selection: DifficultySelection): void {
   try {
-    window.localStorage.setItem(SELECTION_KEY, JSON.stringify(selection));
+    window.localStorage.setItem(SELECTION_KEY, JSON.stringify(normalizeSelection(selection)));
   } catch {
     /* noop */
   }

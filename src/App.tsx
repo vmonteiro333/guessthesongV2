@@ -105,8 +105,8 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
 
   /**
    * Pool efetivo da partida: a dimensão POPULARIDADE filtra as músicas
-   * (percentis por streams). Enquanto os filtros estão "EM BREVE", o toggle
-   * fica desabilitado e o pool é sempre o completo.
+   * (percentis por streams). Enquanto os filtros estão "EM BREVE", o pool
+   * é sempre o completo.
    */
   const effectivePlaylist = useMemo<Playlist>(() => {
     if (!selection.popularity.enabled || selection.popularity.filterId === null) {
@@ -117,8 +117,10 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
     return { ...playlist, songs: filterByPopularity(playlist.songs, filter) };
   }, [playlist, selection]);
 
+  // ⚠️ TEMPO: sempre ativo — não existe mais "desligar".
+  // (id inválido cai no Médio pelo fallback do getDifficulty)
   const effectiveDifficulty = useMemo(
-    () => (selection.time.enabled ? getDifficulty(selection.time.difficultyId) : getDifficulty("normal")),
+    () => getDifficulty(selection.time.difficultyId),
     [selection]
   );
 

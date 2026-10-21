@@ -36,11 +36,11 @@ export interface PopularityFilter {
  * (pode ativar só tempo, só popularidade, as duas ou nenhuma).
  */
 export interface DifficultySelection {
-  time: { enabled: boolean; difficultyId: DifficultyId };
+  time: { difficultyId: DifficultyId };
   popularity: { enabled: boolean; filterId: PopularityFilterId | null };
 }
 
 export const DEFAULT_DIFFICULTY_SELECTION: DifficultySelection = {
-  time: { enabled: false, difficultyId: "normal" },
+  time: { difficultyId: "normal" },
   popularity: { enabled: false, filterId: null },
 };

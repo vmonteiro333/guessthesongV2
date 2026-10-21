@@ -39,9 +39,8 @@ export default function StartScreen({
     if (!empty) ctaRef.current?.focus();
   }, [empty]);
 
-  const activeDifficulty = selection.time.enabled
-    ? getDifficulty(selection.time.difficultyId)
-    : getDifficulty("normal");
+  // ⚠️ TEMPO: sempre ativo — sem toggle, direto no seletor.
+  const activeDifficulty = getDifficulty(selection.time.difficultyId);
 
   return (
     <section className="home" aria-labelledby="home-title">
@@ -103,56 +102,27 @@ export default function StartScreen({
 
         {/* ===== Aba DIFICULDADE: duas dimensões independentes ===== */}
         <div className="dim-panel" role="group" aria-label="Dificuldade">
-          {/* Dimensão TEMPO */}
+          {/* Dimensão TEMPO — sempre ativa, sem toggle */}
           <div className="dim-card">
             <div className="dim-card-head">
               <span className="dim-card-icon" aria-hidden="true">
                 ⏱
               </span>
               <span className="dim-card-name">Tempo</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={selection.time.enabled}
-                aria-label="Ligar ou desligar dificuldade por tempo"
-                className={`dim-switch${selection.time.enabled ? " dim-switch--on" : ""}`}
-                onClick={() =>
-                  onChangeSelection({
-                    ...selection,
-                    time: { ...selection.time, enabled: !selection.time.enabled },
-                  })
-                }
-              >
-                <span className="dim-switch-knob" />
-              </button>
+              <span className="dim-always-badge">SEMPRE ATIVA</span>
             </div>
-            {selection.time.enabled ? (
-              <button
-                type="button"
-                className="dim-card-value"
-                onClick={() => setDiffPickerOpen(true)}
-                aria-haspopup="dialog"
-                aria-label={`Dificuldade de tempo: ${activeDifficulty.name}. Abrir seletor`}
-              >
-                {activeDifficulty.name} · {activeDifficulty.stages.length} etapas
-                <span className="dim-chevron" aria-hidden="true">
-                  ▾
-                </span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="dim-card-value dim-card-value--muted"
-                onClick={() =>
-                  onChangeSelection({
-                    ...selection,
-                    time: { ...selection.time, enabled: true },
-                  })
-                }
-              >
-                Desligado — toque para ligar
-              </button>
-            )}
+            <button
+              type="button"
+              className="dim-card-value"
+              onClick={() => setDiffPickerOpen(true)}
+              aria-haspopup="dialog"
+              aria-label={`Dificuldade de tempo: ${activeDifficulty.name}. Abrir seletor`}
+            >
+              {activeDifficulty.name} · {activeDifficulty.stages.length} etapas
+              <span className="dim-chevron" aria-hidden="true">
+                ▾
+              </span>
+            </button>
           </div>
 
           {/* Dimensão POPULARIDADE — EM BREVE (aguarda streams no catálogo) */}
@@ -230,7 +200,7 @@ export default function StartScreen({
         onSelect={(id) =>
           onChangeSelection({
             ...selection,
-            time: { ...selection.time, difficultyId: id },
+            time: { difficultyId: id },
           })
         }
         onClose={() => setDiffPickerOpen(false)}
