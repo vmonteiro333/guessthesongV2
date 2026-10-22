@@ -149,44 +149,94 @@ async function doHandleAuthRedirect(): Promise<boolean> {
   return true;
 }
 
-/** Access token válido, renovando sozinho quando perto de expirar. */
-export async function getValidAccessToken(force = false): Promise<string> {
+let refreshInFlight: { tokens: StoredTokens; promise: Promise<string> } | null = null;
+let rejectedAccessToken: string | null = null;
+
+function sameTokens(left: StoredTokens | null, right: StoredTokens): boolean {
+  return left !== null &&
+    left.accessToken === right.accessToken &&
+    left.refreshToken === right.refreshToken &&
+    left.expiresAt === right.expiresAt;
+}
+
+/**
+ * Renova uma única vez por sessão. O token rejeitado identifica um 401 atrasado:
+ * se outra chamada já o substituiu, reutiliza a credencial nova e válida.
+ */
+export function getValidAccessToken(force = false, rejectedToken?: string): Promise<string> {
   const tokens = loadTokens();
-  if (!tokens) throw new Error("NOT_LOGGED_IN");
-  if (!force && Date.now() < tokens.expiresAt) return tokens.accessToken;
-  if (Date.now() < tokens.expiresAt) return tokens.accessToken;
+  if (!tokens) return Promise.reject(new Error("NOT_LOGGED_IN"));
+  const mustRefresh = force && (rejectedToken === undefined || rejectedToken === tokens.accessToken);
+  if (mustRefresh) rejectedAccessToken = tokens.accessToken;
+  if (refreshInFlight && sameTokens(tokens, refreshInFlight.tokens)) {
+    return refreshInFlight.promise;
+  }
+  if (!mustRefresh && tokens.accessToken !== rejectedAccessToken && Date.now() < tokens.expiresAt) {
+    return Promise.resolve(tokens.accessToken);
+  }
   if (!tokens.refreshToken) {
     clearTokens();
-    throw new Error("NOT_LOGGED_IN");
+    return Promise.reject(new Error("NOT_LOGGED_IN"));
   }
+
+  const promise = refreshTokens(tokens).finally(() => {
+    // Uma sessão nova pode ter iniciado outro refresh enquanto este terminava.
+    if (refreshInFlight?.promise === promise) refreshInFlight = null;
+  });
+  refreshInFlight = { tokens, promise };
+  return promise;
+}
+
+async function refreshTokens(tokens: StoredTokens): Promise<string> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: tokens.refreshToken,
     client_id: SPOTIFY_CLIENT_ID,
   });
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-  if (!res.ok) {
-    clearTokens();
-    throw new Error("NOT_LOGGED_IN");
+  let res: Response;
+  try {
+    res = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+  } catch {
+    if (!sameTokens(loadTokens(), tokens)) return getValidAccessToken();
+    throw new Error("Falha de rede ao renovar a sessão do Spotify. Tente novamente.");
   }
-  const data = (await res.json()) as {
-    access_token?: string;
-    refresh_token?: string;
-    expires_in?: number;
-  };
-  if (!data.access_token) {
-    clearTokens();
-    throw new Error("NOT_LOGGED_IN");
+  // Não propaga corpos de erro nem mensagens de rede que possam conter credenciais.
+  let data: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = await res.json();
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      data = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Uma resposta inválida não prova que o refresh token perdeu a validade.
+  }
+  // Login, logout ou outra aba podem ter alterado a sessão durante a requisição.
+  if (!sameTokens(loadTokens(), tokens)) return getValidAccessToken();
+  if (!res.ok) {
+    if (res.status >= 400 && res.status < 500 && res.status !== 429 && data?.error === "invalid_grant") {
+      clearTokens();
+      throw new Error("NOT_LOGGED_IN");
+    }
+    throw new Error(`Falha ao renovar a sessão do Spotify (HTTP ${res.status}). Tente novamente.`);
+  }
+  const expiresIn = data?.expires_in ?? 3600;
+  if (
+    typeof data?.access_token !== "string" || !data.access_token.trim() ||
+    typeof expiresIn !== "number" || !Number.isFinite(expiresIn) || expiresIn <= 0 ||
+    (data.refresh_token !== undefined && typeof data.refresh_token !== "string")
+  ) {
+    throw new Error("Resposta inválida ao renovar a sessão do Spotify. Tente novamente.");
   }
   saveTokens({
     accessToken: data.access_token,
-    refreshToken: data.refresh_token || tokens.refreshToken,
-    expiresAt: Date.now() + (Math.max(60, Number(data.expires_in ?? 3600)) - 60) * 1000,
+    refreshToken: (data.refresh_token as string | undefined) || tokens.refreshToken,
+    expiresAt: Date.now() + (Math.max(60, expiresIn) - 60) * 1000,
   });
+  rejectedAccessToken = null;
   return data.access_token;
 }
 

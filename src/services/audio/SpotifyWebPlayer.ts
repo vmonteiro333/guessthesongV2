@@ -258,8 +258,8 @@ export class SpotifyWebPlayer implements AudioPlayer {
     await this.sendPlayCommand(0, 0);
   }
 
-  private async sendPlayCommand(positionMs: number, attempt: number): Promise<void> {
-    const token = await getValidAccessToken();
+  private async sendPlayCommand(positionMs: number, attempt: number, rejectedToken?: string): Promise<void> {
+    const token = await getValidAccessToken(attempt > 0, rejectedToken);
     const res = await fetch(
       "https://api.spotify.com/v1/me/player/play?device_id=" +
         encodeURIComponent(this.deviceId ?? ""),
@@ -270,7 +270,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
       }
     );
     if (res.status === 401 && attempt === 0) {
-      await this.sendPlayCommand(positionMs, attempt + 1);
+      await this.sendPlayCommand(positionMs, attempt + 1, token);
       return;
     }
     if (res.status === 403) {
@@ -301,16 +301,20 @@ export class SpotifyWebPlayer implements AudioPlayer {
    * erro (ok:false — inclui 403/404/rede). 401 força renovação de token.
    */
   async fetchWebPlaybackState(): Promise<WebPollResult> {
+    let rejectedToken: string | undefined;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       if (this.destroyed) return { ok: false };
       try {
-        const token = await getValidAccessToken(attempt > 0);
+        const token = await getValidAccessToken(rejectedToken !== undefined, rejectedToken);
         const res = await fetch(
           "https://api.spotify.com/v1/me/player?additional_types=track",
           { headers: { Authorization: "Bearer " + token } }
         );
         if (res.status === 204) return { ok: true, snapshot: null };
-        if (res.status === 401) continue;
+        if (res.status === 401) {
+          rejectedToken = token;
+          continue;
+        }
         if (res.status === 429) {
           const wait = Number(res.headers.get("Retry-After") ?? "1");
           await new Promise((r) => setTimeout(r, Math.min(5, Math.max(1, wait)) * 1000));
