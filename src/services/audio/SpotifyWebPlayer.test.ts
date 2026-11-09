@@ -70,6 +70,20 @@ afterEach(() => {
 });
 
 describe("recuperação de autenticação do SpotifyWebPlayer", () => {
+  it.each([true, false])("indisponibilidade explícita só se aplica à faixa atual (%s)", async (sameTrack) => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      item: { uri: sameTrack ? "spotify:track:0000000000000000000000" : "spotify:track:1111111111111111111111", is_playable: false },
+    }), { status: 200 }));
+    const result = await player.fetchWebPlaybackState();
+    if (sameTrack) expect(result).toMatchObject({ ok: false, error: { kind: "unavailable" } });
+    else expect(result.ok).toBe(true);
+  });
+  it("polling propaga causa de invalid_grant sem mascará-la como falha temporária", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+    await expect(player.fetchWebPlaybackState()).resolves.toMatchObject({ ok: false, error: { kind: "auth" } });
+    expect(storage.has(TOKENS_KEY)).toBe(false);
+  });
   it("play recupera de 401 e repete o mesmo comando com o token novo", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
       .mockResolvedValueOnce(tokenResponse())
@@ -111,7 +125,7 @@ describe("recuperação de autenticação do SpotifyWebPlayer", () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
       .mockResolvedValueOnce(tokenResponse())
       .mockResolvedValueOnce(new Response(null, { status: 401 }));
-    await expect(player.fetchWebPlaybackState()).resolves.toEqual({ ok: false });
+    await expect(player.fetchWebPlaybackState()).resolves.toMatchObject({ ok: false, error: { kind: "temporary", status: 401 } });
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -127,7 +141,7 @@ describe("recuperação de autenticação do SpotifyWebPlayer", () => {
 
   it.each([403, 404, 500])("consulta preserva tratamento de HTTP %i sem refresh", async (status) => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status }));
-    await expect(player.fetchWebPlaybackState()).resolves.toEqual({ ok: false });
+    await expect(player.fetchWebPlaybackState()).resolves.toMatchObject({ ok: false, error: { kind: "temporary", status } });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -166,7 +180,7 @@ describe("recuperação de autenticação do SpotifyWebPlayer", () => {
   it("falha temporária no refresh da consulta preserva a sessão", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
       .mockResolvedValueOnce(new Response(null, { status: 500 }));
-    await expect(player.fetchWebPlaybackState()).resolves.toEqual({ ok: false });
+    await expect(player.fetchWebPlaybackState()).resolves.toMatchObject({ ok: false, error: { kind: "temporary" } });
     expect(storage.has(TOKENS_KEY)).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });

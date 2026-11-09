@@ -6,7 +6,7 @@ export type GameStatus =
   | "waiting_answer"  // trecho encerrado, aguardando resposta
   | "finished"        // rodada encerrada (acerto ou fim)
   | "game_over"       // todas as músicas concluídas
-  | "error";          // erro de carga (avanço automático em andamento)
+  | "paused";         // falha recuperável; aguarda ação explícita
 
 export type GuessOutcome = "correct" | "artist" | "wrong";
 

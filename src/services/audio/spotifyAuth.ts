@@ -3,6 +3,7 @@ import {
   SPOTIFY_SCOPES,
   getSpotifyRedirectUri,
 } from "../../config/spotify";
+import { AudioFailure } from "./errors";
 
 const TOKENS_KEY = "gts:spotify:tokens:v2";
 const VERIFIER_KEY = "gts:spotify:verifier";
@@ -107,6 +108,12 @@ export function handleAuthRedirect(): Promise<boolean> {
 
 async function doHandleAuthRedirect(): Promise<boolean> {
   const params = new URLSearchParams(window.location.search);
+  if (params.has("error")) {
+    window.history.replaceState({}, "", getSpotifyRedirectUri());
+    window.localStorage.removeItem(VERIFIER_KEY);
+    window.localStorage.removeItem(STATE_KEY);
+    throw new AudioFailure("auth", "O login do Spotify foi cancelado ou recusado. Tente conectar novamente.");
+  }
   const code = params.get("code");
   const state = params.get("state");
   if (!code || !state) return false;
@@ -165,7 +172,7 @@ function sameTokens(left: StoredTokens | null, right: StoredTokens): boolean {
  */
 export function getValidAccessToken(force = false, rejectedToken?: string): Promise<string> {
   const tokens = loadTokens();
-  if (!tokens) return Promise.reject(new Error("NOT_LOGGED_IN"));
+  if (!tokens) return Promise.reject(new AudioFailure("auth", "NOT_LOGGED_IN"));
   const mustRefresh = force && (rejectedToken === undefined || rejectedToken === tokens.accessToken);
   if (mustRefresh) rejectedAccessToken = tokens.accessToken;
   if (refreshInFlight && sameTokens(tokens, refreshInFlight.tokens)) {
@@ -176,7 +183,7 @@ export function getValidAccessToken(force = false, rejectedToken?: string): Prom
   }
   if (!tokens.refreshToken) {
     clearTokens();
-    return Promise.reject(new Error("NOT_LOGGED_IN"));
+    return Promise.reject(new AudioFailure("auth", "NOT_LOGGED_IN"));
   }
 
   const promise = refreshTokens(tokens).finally(() => {
@@ -219,7 +226,7 @@ async function refreshTokens(tokens: StoredTokens): Promise<string> {
   if (!res.ok) {
     if (res.status >= 400 && res.status < 500 && res.status !== 429 && data?.error === "invalid_grant") {
       clearTokens();
-      throw new Error("NOT_LOGGED_IN");
+      throw new AudioFailure("auth", "NOT_LOGGED_IN");
     }
     throw new Error(`Falha ao renovar a sessão do Spotify (HTTP ${res.status}). Tente novamente.`);
   }
@@ -241,5 +248,5 @@ async function refreshTokens(tokens: StoredTokens): Promise<string> {
 }
 
 export function isNotLoggedInError(error: unknown): boolean {
-  return error instanceof Error && error.message === "NOT_LOGGED_IN";
+  return error instanceof AudioFailure && error.kind === "auth";
 }

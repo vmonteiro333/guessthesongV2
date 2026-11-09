@@ -5,6 +5,7 @@ import type {
 import type { AudioPlayer, Unsubscribe } from "./types";
 import { toSpotifyUri } from "../../utils/spotifyUrl";
 import { getValidAccessToken, isNotLoggedInError } from "./spotifyAuth";
+import { AudioFailure, audioFailure } from "./errors";
 
 const SDK_SCRIPT_URL = "https://sdk.scdn.co/spotify-player.js";
 const SDK_READY_TIMEOUT_MS = 15_000;
@@ -82,7 +83,7 @@ export interface WebPlaybackSnapshot {
 
 export type WebPollResult =
   | { ok: true; snapshot: WebPlaybackSnapshot | null }
-  | { ok: false };
+  | { ok: false; error: AudioFailure };
 
 /**
  * Player via Web Playback SDK (Premium). SINGLETON.
@@ -117,7 +118,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
     pause: new Set<() => void>(),
     progress: new Set<(positionMs: number) => void>(),
     finish: new Set<() => void>(),
-    error: new Set<(message: string) => void>(),
+    error: new Set<(error: AudioFailure) => void>(),
   };
 
   init(): Promise<void> {
@@ -145,11 +146,9 @@ export class SpotifyWebPlayer implements AudioPlayer {
             .then(cb)
             .catch((error) => {
               if (isNotLoggedInError(error)) {
-                this.failConnection("Sessão do Spotify expirada — conecte-se novamente.");
+                this.failConnection(new AudioFailure("auth", "Sessão do Spotify expirada — conecte-se novamente."));
               } else {
-                this.emitError(
-                  error instanceof Error ? error.message : "Falha ao obter o token do Spotify."
-                );
+                this.emitError(audioFailure(error));
               }
             });
         },
@@ -169,7 +168,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
         this.failConnection("Falha ao iniciar o player do Spotify: " + message)
       );
       player.addListener("authentication_error", ({ message }) =>
-        this.failConnection("Autenticação do Spotify falhou (" + message + "). Conecte-se novamente.")
+        this.failConnection(new AudioFailure("auth", "Autenticação do Spotify falhou (" + message + "). Conecte-se novamente."))
       );
       player.addListener("account_error", () =>
         this.failConnection("Esta conta não é Premium — o áudio completo exige Spotify Premium.")
@@ -177,6 +176,11 @@ export class SpotifyWebPlayer implements AudioPlayer {
       player.addListener("playback_error", ({ message }) =>
         this.emitError("Erro de reprodução do Spotify: " + message)
       );
+      player.addListener("not_ready", () => {
+        this.deviceId = null;
+        this.connectPromise = null;
+        this.emitError(new AudioFailure("temporary", "O device do Spotify desconectou. Tente novamente."));
+      });
     }
 
     if (this.deviceId) return;
@@ -224,7 +228,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
     if (this.destroyed) throw new Error("O player foi encerrado.");
     const uri = toSpotifyUri(url);
     if (!uri) {
-      throw new Error("URL do Spotify inválida (esperado https://open.spotify.com/track/...).");
+      throw new AudioFailure("unavailable", "URL do Spotify inválida (esperado https://open.spotify.com/track/...).");
     }
     // Silencia qualquer resíduo antes de trocar a faixa (Web API).
     void this.sendPauseCommand().catch(() => {});
@@ -274,15 +278,17 @@ export class SpotifyWebPlayer implements AudioPlayer {
       return;
     }
     if (res.status === 403) {
-      throw new Error(
-        "O Spotify recusou o comando de tocar. Causas mais comuns: (1) sua conta não está autorizada neste app — peça ao dono para adicionar seu e-mail no User Management do dashboard; (2) conta sem Premium; (3) faixa indisponível no seu país."
+      throw new AudioFailure("temporary",
+        "O Spotify recusou o comando de tocar. Verifique se a conta tem Premium e acesso ao aplicativo.", 403
       );
     }
     if (res.status === 404) {
-      throw new Error("O device do jogo não está mais ativo — recarregue a página.");
+      this.deviceId = null;
+      this.connectPromise = null;
+      throw new AudioFailure("temporary", "O device do jogo não está mais ativo — tente novamente.", 404);
     }
     if (!res.ok) {
-      throw new Error("Falha ao iniciar a reprodução (" + res.status + ").");
+      throw new AudioFailure("temporary", "Falha ao iniciar a reprodução (" + res.status + ").", res.status);
     }
   }
 
@@ -302,8 +308,9 @@ export class SpotifyWebPlayer implements AudioPlayer {
    */
   async fetchWebPlaybackState(): Promise<WebPollResult> {
     let rejectedToken: string | undefined;
+    let lastError = new AudioFailure("temporary", "Falha ao consultar a reprodução do Spotify.");
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (this.destroyed) return { ok: false };
+      if (this.destroyed) return { ok: false, error: lastError };
       try {
         const token = await getValidAccessToken(rejectedToken !== undefined, rejectedToken);
         const res = await fetch(
@@ -313,18 +320,22 @@ export class SpotifyWebPlayer implements AudioPlayer {
         if (res.status === 204) return { ok: true, snapshot: null };
         if (res.status === 401) {
           rejectedToken = token;
+          lastError = new AudioFailure("temporary", "O Spotify recusou a consulta de reprodução (401). Tente novamente.", 401);
           continue;
         }
         if (res.status === 429) {
+          lastError = new AudioFailure("temporary", "O Spotify limitou as consultas. Aguarde e tente novamente.", 429);
           const wait = Number(res.headers.get("Retry-After") ?? "1");
           await new Promise((r) => setTimeout(r, Math.min(5, Math.max(1, wait)) * 1000));
           continue;
         }
-        if (!res.ok) return { ok: false };
+        if (!res.ok) return { ok: false, error: new AudioFailure("temporary", "Falha ao consultar a reprodução (" + res.status + ").", res.status) };
         const data = (await res.json()) as {
           is_playing?: boolean;
           progress_ms?: number;
           item?: {
+            uri?: string;
+            is_playable?: boolean;
             name?: string;
             duration_ms?: number;
             album?: { images?: { url: string }[] };
@@ -332,6 +343,11 @@ export class SpotifyWebPlayer implements AudioPlayer {
           } | null;
         };
         if (!data.item) return { ok: true, snapshot: null };
+        // Só a indicação explícita para a faixa pedida comprova indisponibilidade.
+        // Um estado de outra faixa/dispositivo não deve consumir a rodada atual.
+        if (data.item.uri === this.trackUri && data.item.is_playable === false) {
+          return { ok: false, error: new AudioFailure("unavailable", "O Spotify informou que esta faixa não está disponível para sua conta.") };
+        }
         const snapshot: WebPlaybackSnapshot = {
           isPlaying: data.is_playing === true,
           progressMs: typeof data.progress_ms === "number" ? data.progress_ms : null,
@@ -343,11 +359,11 @@ export class SpotifyWebPlayer implements AudioPlayer {
         };
         if (snapshot.durationMs > 0) this.durationMs = snapshot.durationMs;
         return { ok: true, snapshot };
-      } catch {
-        return { ok: false };
+      } catch (error) {
+        return { ok: false, error: audioFailure(error) };
       }
     }
-    return { ok: false };
+    return { ok: false, error: lastError };
   }
 
     /**
@@ -366,6 +382,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
         if (this.destroyed) throw new Error("O player foi encerrado.");
         if (isCancelled?.()) throw new Error("cancelled");
         const poll = await this.fetchWebPlaybackState();
+        if (!poll.ok) throw poll.error;
         if (
           poll.ok &&
           poll.snapshot &&
@@ -447,7 +464,8 @@ export class SpotifyWebPlayer implements AudioPlayer {
           body: JSON.stringify({ device_ids: [this.deviceId], play: false }),
         });
         return res.ok || res.status === 204;
-      } catch {
+      } catch (error) {
+        if (isNotLoggedInError(error)) throw error;
         return false;
       }
     }
@@ -490,16 +508,19 @@ export class SpotifyWebPlayer implements AudioPlayer {
     this.destroyed = true;
   }
 
-  private failConnection(message: string): void {
+  private failConnection(cause: string | AudioFailure): void {
+    const error = typeof cause === "string" ? new AudioFailure("temporary", cause) : cause;
     const waiters = this.readyWaiters;
     this.readyWaiters = [];
-    waiters.forEach((w) => w.reject(new Error(message)));
+    waiters.forEach((w) => w.reject(error));
     this.connectPromise = null;
-    this.emitError(message);
+    this.deviceId = null;
+    this.emitError(error);
   }
 
-  private emitError(message: string): void {
-    this.listeners.error.forEach((fn) => safeCall(fn, message));
+  private emitError(cause: string | AudioFailure): void {
+    const error = typeof cause === "string" ? new AudioFailure("temporary", cause) : cause;
+    this.listeners.error.forEach((fn) => safeCall(fn, error));
   }
 
   onReady(listener: () => void): Unsubscribe {
@@ -517,7 +538,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
   onFinish(listener: () => void): Unsubscribe {
     return this.subscribe(this.listeners.finish, listener);
   }
-  onError(listener: (message: string) => void): Unsubscribe {
+  onError(listener: (error: AudioFailure) => void): Unsubscribe {
     return this.subscribe(this.listeners.error, listener);
   }
 

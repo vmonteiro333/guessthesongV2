@@ -52,6 +52,23 @@ afterEach(() => {
 });
 
 describe("renovação de tokens Spotify", () => {
+  it("retorno OAuth cancelado preserva o snapshot e permite outro login", async () => {
+    const snapshot = "partida-pendente";
+    const sessions = new Map([["guessthesong:recovery:v1", snapshot]]);
+    const replaceState = vi.fn();
+    storage.set("gts:spotify:verifier", "fake-verifier");
+    storage.set("gts:spotify:state", "fake-state");
+    Object.assign(window, {
+      location: { search: "?error=access_denied&state=fake-state", origin: "https://example.com", pathname: "/game/" },
+      history: { replaceState },
+      sessionStorage: { getItem: (key: string) => sessions.get(key) ?? null },
+    });
+    await expect(auth.handleAuthRedirect()).rejects.toMatchObject({ kind: "auth" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(replaceState).toHaveBeenCalledWith({}, "", "https://example.com/game/");
+    expect(storage.has("gts:spotify:state")).toBe(false);
+    expect(sessions.get("guessthesong:recovery:v1")).toBe(snapshot);
+  });
   it("reutiliza token válido sem fazer refresh", async () => {
     await expect(auth.getValidAccessToken()).resolves.toBe(original.accessToken);
     expect(fetchMock).not.toHaveBeenCalled();

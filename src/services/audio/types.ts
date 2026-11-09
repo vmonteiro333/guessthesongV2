@@ -1,3 +1,5 @@
+import type { AudioFailure } from "./errors";
+
 export type Unsubscribe = () => void;
 
 /**
@@ -22,5 +24,5 @@ export interface AudioPlayer {
   onPause(listener: () => void): Unsubscribe;
   onProgress(listener: (positionMs: number) => void): Unsubscribe;
   onFinish(listener: () => void): Unsubscribe;
-  onError(listener: (message: string) => void): Unsubscribe;
+  onError(listener: (error: AudioFailure) => void): Unsubscribe;
 }

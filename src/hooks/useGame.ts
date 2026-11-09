@@ -10,8 +10,9 @@ import { shuffle } from "../utils/shuffle";
 import { isSpotifyTrackUrl } from "../utils/spotifyUrl";
 import { loadBestScore, saveBestScore } from "../utils/storage";
 import type { UseAudioResult } from "./useAudio";
-
-const ERROR_ADVANCE_DELAY_MS = 3_000;
+import { AudioFailure, audioFailure } from "../services/audio/errors";
+import { clearGameSession, resumedStatus } from "../utils/gameSession";
+import type { GameProgress, ResumeStatus } from "../utils/gameSession";
 
 export type FeedbackKind =
   | "correct"
@@ -28,6 +29,13 @@ export interface GuessFeedback {
 }
 
 export interface UseGameResult {
+  recovery: AudioFailure | null;
+  retrying: boolean;
+  hintCoverUrl: string | null;
+  retryRecovery: () => Promise<void>;
+  skipUnavailable: () => void;
+  pauseForReconnect: () => void;
+  getProgress: () => GameProgress;
   gameStatus: GameStatus;
   queue: Song[];
   currentSong: Song | null;
@@ -60,24 +68,32 @@ export interface UseGameResult {
  * Estado central do jogo. Não executa NENHUMA chamada direta às APIs de
  * áudio: toda a reprodução passa por useAudio.
  */
-export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: Difficulty): UseGameResult {
-  const [gameStatus, setGameStatus] = useState<GameStatus>("idle");
-  const [queue, setQueue] = useState<Song[]>([]);
-  const [currentSongIndex, setCurrentSongIndex] = useState(0);
-  const [stageIndex, setStageIndex] = useState(0);
-  const [answer, setAnswer] = useState({ artist: "", title: "" });
+export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: Difficulty, initialProgress?: GameProgress): UseGameResult {
+  const [gameStatus, setGameStatus] = useState<GameStatus>(initialProgress?.status ?? "idle");
+  const [queue, setQueue] = useState<Song[]>(() => initialProgress?.queueIds.map((id) => playlist.songs.find((s) => s.id === id)!) ?? []);
+  const [currentSongIndex, setCurrentSongIndex] = useState(initialProgress?.currentSongIndex ?? 0);
+  const [stageIndex, setStageIndex] = useState(initialProgress?.stageIndex ?? 0);
+  const [answer, setAnswer] = useState(initialProgress?.answer ?? { artist: "", title: "" });
   const [feedback, setFeedback] = useState<GuessFeedback | null>(null);
-  const [score, setScore] = useState(0);
-  const [history, setHistory] = useState<SongRoundResult[]>([]);
+  const [score, setScore] = useState(initialProgress?.score ?? 0);
+  const [history, setHistory] = useState<SongRoundResult[]>(initialProgress?.history ?? []);
   const [listenSeq, setListenSeq] = useState(0);
-  const [streak, setStreak] = useState(0);
-  const [maxStreak, setMaxStreak] = useState(0);
-  const [lastBrokenCombo, setLastBrokenCombo] = useState(0);
-  const streakRef = useRef(0);
+  const [streak, setStreak] = useState(initialProgress?.streak ?? 0);
+  const [maxStreak, setMaxStreak] = useState(initialProgress?.maxStreak ?? 0);
+  const [lastBrokenCombo, setLastBrokenCombo] = useState(initialProgress?.lastBrokenCombo ?? 0);
+  const streakRef = useRef(initialProgress?.streak ?? 0);
+  const [recovery, setRecovery] = useState<AudioFailure | null>(null);
+  const recoveryRef = useRef<AudioFailure | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const retryingRef = useRef(false);
+  const resumeRef = useRef<ResumeStatus>(initialProgress?.status ?? "ready");
+  const statusRef = useRef(gameStatus);
+  statusRef.current = gameStatus;
+  const [hintCoverUrl, setHintCoverUrl] = useState(initialProgress?.hintCoverUrl ?? null);
   const stages = difficulty.stages;
 
   /** Estado da rodada em andamento (artista descoberto antes do título). */
-  const roundRef = useRef<{ artistCorrect: boolean; artistAtStage: number | null }>({
+  const roundRef = useRef<{ artistCorrect: boolean; artistAtStage: number | null }>(initialProgress?.round ?? {
     artistCorrect: false,
     artistAtStage: null,
   });
@@ -87,37 +103,35 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
   const loadSeqRef = useRef(0);
   /** Trava curta contra duplo-SKIP acidental. */
   const skipLockRef = useRef(false);
-  /** Timer de avanço automático após erro de carga. */
-  const advanceTimerRef = useRef(0);
+  const skipTimerRef = useRef(0);
 
   const currentSong = queue[currentSongIndex] ?? null;
 
-  const clearAdvanceTimer = useCallback(() => {
-    if (advanceTimerRef.current !== 0) {
-      window.clearTimeout(advanceTimerRef.current);
-      advanceTimerRef.current = 0;
-    }
-  }, []);
+  const invalidateOperations = useCallback(() => {
+    playTokenRef.current += 1;
+    loadSeqRef.current += 1;
+    window.clearTimeout(skipTimerRef.current);
+    skipLockRef.current = false;
+    audio.stopPlayback();
+  }, [audio.stopPlayback]);
 
   useEffect(() => {
-    return () => {        
-      if (advanceTimerRef.current !== 0) window.clearTimeout(advanceTimerRef.current);
-    };
-  }, []);
+    return invalidateOperations;
+  }, [invalidateOperations]);
 
-  const [hints, setHints] = useState<{ artist: boolean; cover: boolean }>({
+  const [hints, setHints] = useState<{ artist: boolean; cover: boolean }>(initialProgress?.hints ?? {
     artist: false,
     cover: false,
   });
 
   const revealHint = useCallback(
     (kind: "artist" | "cover") => {
-      if (!difficulty.allowHints) return;
+      if (!difficulty.allowHints || recoveryRef.current || audio.serviceStatus !== "ready") return;
       // Decisão documentada: dica NÃO marca artistCorrect/artistAtStage —
       // pontos parciais continuam vindo só de PALPITE (score intocado).
       setHints((prev) => (prev[kind] ? prev : { ...prev, [kind]: true }));
     },
-    [difficulty.allowHints]
+    [difficulty.allowHints, audio.serviceStatus]
   );
 
   /** UMA entrada por música (atualizável) — nunca cards duplicados. */
@@ -149,65 +163,57 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
     });
   }, []);
 
-  // Ref indireto para quebrar dependência circular entre callbacks.
-  const goToNextSongRef = useRef<() => void>(() => {});
+  const pause = useCallback((cause: unknown) => {
+    const error = audioFailure(cause);
+    if (statusRef.current !== "paused" && statusRef.current !== "loading" && statusRef.current !== "playing") {
+      resumeRef.current = resumedStatus(statusRef.current);
+    }
+    recoveryRef.current = error;
+    setRecovery(error);
+    invalidateOperations();
+    setGameStatus("paused");
+  }, [invalidateOperations]);
 
-  const handleSongError = useCallback(
-    (song: Song, message: string) => {
-      upsertHistory(song, {
-        error: true,
-        solved: false,
-        titleCorrect: false,
-        artistCorrect: false,
-        artistAtStage: null,
-        solvedAtStage: null,
-        points: 0,
-        finalized: true,
-      });
-      setFeedback({
-        kind: "info",
-        message: "Não foi possível carregar esta música. Pulando para a próxima.",
-        detail: message,
-      });
-      setGameStatus("error");
-      clearAdvanceTimer();
-      advanceTimerRef.current = window.setTimeout(() => {
-        advanceTimerRef.current = 0;
-        goToNextSongRef.current();
-      }, ERROR_ADVANCE_DELAY_MS);
-    },
-    [upsertHistory, clearAdvanceTimer]
-  );
+  useEffect(() => {
+    if (audio.serviceStatus === "connecting" && retryingRef.current) return;
+    if (queue.length && gameStatus !== "idle" && gameStatus !== "game_over" && audio.serviceStatus !== "ready") {
+      if (gameStatus !== "paused" || (audio.failure && audio.failure !== recoveryRef.current)) {
+        pause(audio.failure ?? new AudioFailure("temporary", "Conectando ao Spotify…"));
+      }
+    }
+  }, [audio.serviceStatus, audio.failure, pause, queue.length, gameStatus]);
 
   const loadCurrentSong = useCallback(
-    async (song: Song, token: number) => {
+    async (song: Song, token: number, resume: ResumeStatus = "ready") => {
+      resumeRef.current = resume;
       setGameStatus("loading");
       try {
         const url = song.spotifyUrl?.trim() ?? "";
         if (!isSpotifyTrackUrl(url)) {
-          handleSongError(song, "Sem spotifyUrl válida cadastrada para esta música.");
-          return;
+          throw new AudioFailure("unavailable", "Esta música não tem um link válido do Spotify cadastrado.");
         }
         await audio.loadTrack(url);
         if (token !== loadSeqRef.current) return;
         setFeedback(null);
-        setGameStatus("ready");
+        recoveryRef.current = null;
+        setRecovery(null);
+        setGameStatus(resume);
       } catch (error) {
         if (token !== loadSeqRef.current) return;
-        handleSongError(
-          song,
-          error instanceof Error ? error.message : "Erro desconhecido ao carregar a faixa."
-        );
+        pause(error);
       }
     },
-    [audio, handleSongError]
+    [audio.loadTrack, pause]
   );
 
   const goToNextSong = useCallback(() => {
-    clearAdvanceTimer();
+    invalidateOperations();
+    recoveryRef.current = null;
+    setRecovery(null);
     const next = currentSongIndex + 1;
     if (next >= queue.length) {
       setGameStatus("game_over");
+      clearGameSession();
       return;
     }
     roundRef.current = { artistCorrect: false, artistAtStage: null };
@@ -217,25 +223,55 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
     setAnswer({ artist: "", title: "" });
     setFeedback(null);
     setHints({ artist: false, cover: false });
+    setHintCoverUrl(null);
     loadSeqRef.current += 1;
     const token = loadSeqRef.current;
     void loadCurrentSong(queue[next], token);
-  }, [currentSongIndex, queue, clearAdvanceTimer, loadCurrentSong]);
+  }, [currentSongIndex, queue, invalidateOperations, loadCurrentSong]);
 
+  const retryRecovery = useCallback(async () => {
+    if (!currentSong || !recoveryRef.current || retryingRef.current) return;
+    retryingRef.current = true;
+    setRetrying(true);
+    const token = ++loadSeqRef.current;
+    try {
+      if (await audio.retry() && token === loadSeqRef.current) {
+        await loadCurrentSong(currentSong, token, resumeRef.current);
+      }
+    } finally { retryingRef.current = false; setRetrying(false); }
+  }, [audio.retry, currentSong, loadCurrentSong]);
+
+  const skipUnavailable = useCallback(() => {
+    if (recoveryRef.current?.kind !== "unavailable" || !currentSong || retryingRef.current) return;
+    upsertHistory(currentSong, { error: true, finalized: true, points: 0 });
+    goToNextSong();
+  }, [currentSong, upsertHistory, goToNextSong]);
+
+  // A hidratação ocorre nos inicializadores. O efeito só prepara o áudio, sem tocar ou pontuar.
+  const restoreRef = useRef(initialProgress);
   useEffect(() => {
-    goToNextSongRef.current = goToNextSong;
-  }, [goToNextSong]);
+    const progress = restoreRef.current;
+    if (!progress) return;
+    clearGameSession();
+    const song = playlist.songs.find((s) => s.id === progress.queueIds[progress.currentSongIndex]);
+    if (song) void loadCurrentSong(song, ++loadSeqRef.current, progress.status);
+    return () => { loadSeqRef.current += 1; };
+  }, [loadCurrentSong, playlist]);
 
   const startGame = useCallback(() => {
     if (playlist.songs.length === 0) return;                    // ← mudou (era catalog.length)
     if (gameStatus !== "idle" && gameStatus !== "game_over") return;
-    clearAdvanceTimer();
+    clearGameSession();
+    if (audio.serviceStatus !== "ready") return;
+    recoveryRef.current = null;
+    setRecovery(null);
     audio.stopPlayback();
 
     const shuffled = shuffle(playlist.songs);                   // ← mudou (era shuffle(catalog))
     roundRef.current = { artistCorrect: false, artistAtStage: null };
     playTokenRef.current += 1;
     setHints({ artist: false, cover: false });
+    setHintCoverUrl(null);
     setQueue(shuffled);
     setCurrentSongIndex(0);
     setStageIndex(0);
@@ -251,16 +287,18 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
     const token = loadSeqRef.current;
     setGameStatus("loading");
     void loadCurrentSong(shuffled[0], token);
-  }, [gameStatus, audio, clearAdvanceTimer, loadCurrentSong, playlist]);  // ← mudou (adicionou playlist)
+  }, [gameStatus, audio, loadCurrentSong, playlist]);
 
   /** OUVIR: toca do início e para no limite do estágio atual. */
   const listen = useCallback(async () => {
+    if (recoveryRef.current || audio.serviceStatus !== "ready") return;
     if (gameStatus !== "ready" && gameStatus !== "waiting_answer") return;
     const song = currentSong;
     if (!song) return;
     setListenSeq((n) => n + 1);
     const token = ++playTokenRef.current;
     setFeedback(null);
+    resumeRef.current = resumedStatus(gameStatus);
     setGameStatus("playing");
     try {
       const result = await audio.playSnippet(stages[stageIndex]); 
@@ -272,14 +310,9 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
       }
     } catch (error) {
       if (token !== playTokenRef.current) return;
-      setFeedback({
-        kind: "info",
-        message: "Não foi possível reproduzir o trecho. Tente ouvir novamente.",
-        detail: error instanceof Error ? error.message : undefined,
-      });
-      setGameStatus("ready");
+      pause(error);
     }
-  }, [gameStatus, currentSong, stageIndex, audio]);
+  }, [gameStatus, currentSong, stageIndex, audio, pause]);
 
   /** Encerra a rodada UMA vez, com pontuação única e sem dupla contagem. */
   const finalizeRound = useCallback(
@@ -335,11 +368,12 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
   );
 
   const skip = useCallback(() => {
+    if (recoveryRef.current || audio.serviceStatus !== "ready") return;
     const status = gameStatus;
     if (status !== "ready" && status !== "waiting_answer" && status !== "playing") return;
     if (skipLockRef.current) return; // sem SKIPs concorrentes
     skipLockRef.current = true;
-    window.setTimeout(() => {
+    skipTimerRef.current = window.setTimeout(() => {
       skipLockRef.current = false;
     }, 300);
 
@@ -359,6 +393,7 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
   }, [gameStatus, stageIndex, audio, finalizeRound]);
 
   const submitAnswer = useCallback(() => {
+    if (recoveryRef.current || audio.serviceStatus !== "ready") return;
     if (gameStatus !== "waiting_answer") return;
     const song = currentSong;
     if (!song) return;
@@ -404,8 +439,9 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
   }, [gameStatus, currentSong, answer, stageIndex, finalizeRound, upsertHistory, playlist]);
 
   const setAnswerField = useCallback((value: string) => {
+    if (recoveryRef.current || audio.serviceStatus !== "ready") return;
     setAnswer((prev) => ({ ...prev, title: value }));
-  }, []);
+  }, [audio.serviceStatus]);
 
   // Recorde pessoal em localStorage (best-effort).
   useEffect(() => {
@@ -414,6 +450,19 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
   }, [gameStatus, score]);
 
   return {
+    recovery,
+    retrying,
+    hintCoverUrl,
+    retryRecovery,
+    skipUnavailable,
+    pauseForReconnect: () => pause(new AudioFailure("auth", "Reconecte sua sessão do Spotify.")),
+    getProgress: () => ({
+      queueIds: queue.map((song) => song.id), currentSongIndex, stageIndex,
+      status: gameStatus === "paused" || gameStatus === "loading" || gameStatus === "playing" ? resumeRef.current : resumedStatus(gameStatus),
+      score, history, streak, maxStreak, lastBrokenCombo, hints,
+      hintCoverUrl: hints.cover ? audio.trackMeta?.coverUrl ?? hintCoverUrl : null,
+      answer, round: { ...roundRef.current },
+    }),
     activeResult: history.find((entry) => entry.songId === currentSong?.id && entry.finalized) ?? null,
     listenSeq,
     gameStatus,
@@ -439,6 +488,8 @@ export function useGame(audio: UseAudioResult, playlist: Playlist, difficulty: D
     skip,
     submitAnswer,
     setAnswerField,
-    nextSong: goToNextSong,
+    nextSong: () => {
+      if (gameStatus === "finished" && !recoveryRef.current && audio.serviceStatus === "ready") goToNextSong();
+    },
   };
-}   
+}

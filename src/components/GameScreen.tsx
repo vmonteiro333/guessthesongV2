@@ -21,6 +21,8 @@ interface GameScreenProps {
   difficulty: Difficulty;
   resultsOpen: boolean;
   onCloseResults: () => void;
+  onReconnect: () => void;
+  redirecting: boolean;
 }
 
 export default function GameScreen({
@@ -30,6 +32,8 @@ export default function GameScreen({
   difficulty,
   resultsOpen,
   onCloseResults,
+  onReconnect,
+  redirecting,
 }: GameScreenProps) {
   const { gameStatus, feedback, currentSongIndex, queue, history } = game;
 
@@ -57,7 +61,7 @@ export default function GameScreen({
   const canAnswer = gameStatus === "waiting_answer";
   const canListen = gameStatus === "ready" || gameStatus === "waiting_answer";
   const isLastRound = currentSongIndex + 1 >= queue.length;
-  const serviceFatal = audio.serviceStatus === "error";
+  const blocked = game.recovery !== null || audio.serviceStatus !== "ready";
 
   return (
     <section className="game-screen" aria-label="Rodada atual">
@@ -65,12 +69,23 @@ export default function GameScreen({
 
       <StageIndicator stageIndex={game.stageIndex} stages={difficulty.stages} />
 
-      {serviceFatal && (
+      {blocked && (
         <div className="alert" role="alert">
-          <p>O player do Spotify reportou um erro.</p>
-          <p className="alert-detail">{audio.serviceError}</p>
-          <button type="button" className="btn btn-ghost" onClick={() => window.location.reload()}>
-            Recarregar página
+          <p>{game.recovery?.kind === "unavailable" ? "Faixa indisponível para este jogo." :
+            game.recovery?.kind === "auth" || audio.serviceStatus === "needs_login" ? "Reconecte o Spotify para continuar a partida." :
+            "O Spotify está temporariamente indisponível. Seu progresso foi mantido."}</p>
+          <p className="alert-detail">{audio.serviceError ?? (game.recovery?.kind !== "auth" ? game.recovery?.message : null)}</p>
+          {game.recovery?.kind === "unavailable" ? (
+            <button type="button" className="btn btn-ghost" onClick={game.skipUnavailable} disabled={game.retrying || redirecting}>
+              Pular esta música
+            </button>
+          ) : game.recovery?.kind !== "auth" && audio.serviceStatus !== "needs_login" && (
+            <button type="button" className="btn btn-primary" onClick={() => void game.retryRecovery()} disabled={game.retrying || redirecting}>
+              {game.retrying ? "Conectando…" : "Tentar novamente"}
+            </button>
+          )}
+          <button type="button" className="btn btn-ghost" onClick={onReconnect} disabled={game.retrying || redirecting}>
+            {redirecting ? "Redirecionando…" : "Reconectar Spotify"}
           </button>
         </div>
       )}
@@ -86,15 +101,14 @@ export default function GameScreen({
         }
         streak={game.streak}
         hintArtist={game.hints.artist ? (game.currentSong?.artist ?? null) : null}
-        hintCoverUrl={game.hints.cover ? (audio.trackMeta?.coverUrl ?? null) : null}
+        hintCoverUrl={game.hints.cover ? (audio.trackMeta?.coverUrl ?? game.hintCoverUrl) : null}
       />
 
       {gameStatus === "loading" && <LoadingState message="Carregando a música…" />}
-      {gameStatus === "error" && <LoadingState message="Pulando para a próxima música…" />}
 
       <FeedbackPanel feedback={feedback} visible={!roundOver || modalDismissed} />
 
-      {canType && !serviceFatal && (
+      {canType && !blocked && (
         <>
           <div className="listen-row">
             <button
@@ -179,13 +193,13 @@ export default function GameScreen({
         </>
       )}
 
-      {roundOver && (
+      {roundOver && !blocked && (
         <div className="next-row">
           <NextButton isLast={isLastRound} onClick={game.nextSong} />
         </div>
       )}
 
-      {roundOver && game.activeResult && (
+      {roundOver && !blocked && game.activeResult && (
         <TrackModal
           result={game.activeResult}
           spotifyUrl={game.currentSong?.spotifyUrl ?? null}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useGame } from "./hooks/useGame";
 import { useAudio } from "./hooks/useAudio";
@@ -7,8 +7,8 @@ import type { GameModeId } from "./types/gameMode";
 import type { DifficultySelection } from "./types/difficulty";
 import { playlists } from "./data/playlists";
 import { getDifficulty } from "./data/difficulties";
-import { getPopularityFilter } from "./data/popularityFilters";
-import { filterByPopularity } from "./utils/popularity";
+import { clearGameSession, effectiveSongs, readGameSession, reconnectGameSession } from "./utils/gameSession";
+import type { GameSession } from "./utils/gameSession";
 import GameHeader from "./components/GameHeader";
 import GameScreen from "./components/GameScreen";
 import GameOver from "./components/GameOver";
@@ -34,16 +34,28 @@ function findPlaylist(id: string | null): Playlist | null {
 
 export default function App() {
   const audio = useAudio();
+  const [startup, setStartup] = useState(() => readGameSession(playlists));
+  const [hasConnected, setHasConnected] = useState(false);
+  useEffect(() => {
+    if (audio.serviceStatus === "ready") setHasConnected(true);
+  }, [audio.serviceStatus]);
+  useEffect(() => {
+    if (startup.notice) clearGameSession();
+  }, [startup.notice]);
   const [selected, setSelected] = useState<Playlist | null>(() =>
-    findPlaylist(loadSelectedPlaylistId())
+    findPlaylist(startup.session?.playlistId ?? loadSelectedPlaylistId())
   );
 
   const choosePlaylist = (playlist: Playlist): void => {
+    clearGameSession();
+    setStartup({ session: null, notice: null });
     audio.stopPlayback();
     setSelected(playlist);
     saveSelectedPlaylistId(playlist.id);
   };
   const backToPicker = (): void => {
+    clearGameSession();
+    setStartup({ session: null, notice: null });
     audio.stopPlayback();
     setSelected(null);
   };
@@ -51,6 +63,11 @@ export default function App() {
   let screen: ReactNode;
   if (playlists.length === 0) {
     screen = <EmptyState />;
+  } else if (selected && hasConnected) {
+    screen = (
+      <Game key={selected.id} playlist={selected} audio={audio}
+        initialSession={startup.session ?? undefined} onChoosePlaylist={backToPicker} />
+    );
   } else if (audio.serviceStatus === "needs_login") {
     screen = <SpotifyConnect onConnect={audio.login} error={audio.serviceError} />;
   } else if (audio.serviceStatus === "boot" || audio.serviceStatus === "connecting") {
@@ -63,7 +80,7 @@ export default function App() {
         <button
           type="button"
           className="btn btn-primary btn-large"
-          onClick={() => window.location.reload()}
+          onClick={() => void audio.retry()}
         >
           Tentar novamente
         </button>
@@ -78,13 +95,17 @@ export default function App() {
         playlist={selected}
         audio={audio}
         onChoosePlaylist={backToPicker}
+        initialSession={startup.session ?? undefined}
       />
     );
   }
 
   return (
     <div className="app">
-      <main className="app-main">{screen}</main>
+      <main className="app-main">
+        {startup.notice && <p className="alert" role="status">{startup.notice}</p>}
+        {screen}
+      </main>
       <Ribbons />
     </div>
   );
@@ -94,13 +115,14 @@ interface GameProps {
   playlist: Playlist;
   audio: ReturnType<typeof useAudio>;
   onChoosePlaylist: () => void;
+  initialSession?: GameSession;
 }
 
-function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
+function Game({ playlist, audio, onChoosePlaylist, initialSession }: GameProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [modeId, setModeId] = useState<GameModeId>(() => loadSelectedModeId() ?? "classic");
+  const [modeId, setModeId] = useState<GameModeId>(() => initialSession?.modeId ?? loadSelectedModeId() ?? "classic");
   const [selection, setSelection] = useState<DifficultySelection>(() =>
-    loadDifficultySelection()
+    initialSession?.selection ?? loadDifficultySelection()
   );
 
   /**
@@ -109,12 +131,7 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
    * é sempre o completo.
    */
   const effectivePlaylist = useMemo<Playlist>(() => {
-    if (!selection.popularity.enabled || selection.popularity.filterId === null) {
-      return playlist;
-    }
-    const filter = getPopularityFilter(selection.popularity.filterId);
-    if (!filter) return playlist;
-    return { ...playlist, songs: filterByPopularity(playlist.songs, filter) };
+    return { ...playlist, songs: effectiveSongs(playlist, selection) };
   }, [playlist, selection]);
 
   // ⚠️ TEMPO: sempre ativo — não existe mais "desligar".
@@ -124,8 +141,22 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
     [selection]
   );
 
-  const game = useGame(audio, effectivePlaylist, effectiveDifficulty);
+  const game = useGame(audio, effectivePlaylist, effectiveDifficulty, initialSession);
   const { gameStatus } = game;
+  const [redirecting, setRedirecting] = useState(false);
+
+  const reconnect = async (): Promise<void> => {
+    if (redirecting) return;
+    game.pauseForReconnect();
+    setRedirecting(true);
+    try {
+      await reconnectGameSession({
+        ...game.getProgress(), version: 1, savedAt: Date.now(), playlistId: playlist.id, modeId, selection,
+      }, playlists, audio.login, () => window.confirm(
+        "Não foi possível salvar seu progresso neste navegador. Se continuar, a partida será perdida ao reconectar. Deseja continuar mesmo assim?",
+      ));
+    } finally { setRedirecting(false); }
+  };
 
   const showHeader = gameStatus !== "idle" && gameStatus !== "game_over";
   const doneCount = game.history.filter((entry) => entry.finalized).length;
@@ -169,6 +200,8 @@ function Game({ playlist, audio, onChoosePlaylist }: GameProps) {
         difficulty={effectiveDifficulty}
         resultsOpen={drawerOpen}
         onCloseResults={() => setDrawerOpen(false)}
+        onReconnect={() => void reconnect()}
+        redirecting={redirecting}
       />
     );
   }
