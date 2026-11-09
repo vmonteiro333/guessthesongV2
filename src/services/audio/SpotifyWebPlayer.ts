@@ -104,6 +104,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
   private destroyed = false;
   private connectPromise: Promise<void> | null = null;
   private stopEpoch = 0;
+  private sdkHasContext = false;
 
   private positionMs = 0;
   private durationMs = 0;
@@ -173,10 +174,15 @@ export class SpotifyWebPlayer implements AudioPlayer {
       player.addListener("account_error", () =>
         this.failConnection("Esta conta não é Premium — o áudio completo exige Spotify Premium.")
       );
-      player.addListener("playback_error", ({ message }) =>
-        this.emitError("Erro de reprodução do Spotify: " + message)
-      );
+      player.addListener("playback_error", ({ message }) => {
+        const hadContext = this.sdkHasContext;
+        // Invalida antes de notificar: o tratamento da falha pode mandar parar.
+        this.sdkHasContext = false;
+        if (!hadContext && /no list was loaded/i.test(message)) return;
+        this.emitError("Erro de reprodução do Spotify: " + message);
+      });
       player.addListener("not_ready", () => {
+        this.sdkHasContext = false;
         this.deviceId = null;
         this.connectPromise = null;
         this.emitError(new AudioFailure("temporary", "O device do Spotify desconectou. Tente novamente."));
@@ -188,6 +194,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
     const player = this.player;
     const connected = await player.connect();
     if (!connected) throw new Error("Não foi possível conectar o device do Spotify.");
+    if (this.deviceId) return;
 
     await new Promise<void>((resolve, reject) => {
       const timer = window.setTimeout(
@@ -209,6 +216,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
 
   /** Cache best-effort a partir dos eventos (quando o canal local funciona). */
   private handleState(state: SpotifyWebPlaybackState | null): void {
+    this.sdkHasContext = !!state?.track_window?.current_track;
     if (!state) return;
     if (state.duration > 0) this.durationMs = state.duration;
     this.positionMs = state.position;
@@ -414,11 +422,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
     const deadline = performance.now() + maxMs;
     let lastPauseAt = 0;
     let nullCount = 0;
-    try {
-      this.player?.pause();
-    } catch {
-      /* noop */
-    }
+    this.pauseLocal();
     while (performance.now() < deadline) {
       if (cancelled()) return;
       if (performance.now() - lastPauseAt >= 700) {
@@ -445,28 +449,45 @@ export class SpotifyWebPlayer implements AudioPlayer {
   }
     /** Corte imediato: pause local + Web API em paralelo. */
     stopNow(): void {
-      try {
-        this.player?.pause();
-      } catch {
-        /* noop */
-      }
+      this.pauseLocal();
       void this.sendPauseCommand().catch(() => {});
     }
+
+  private pauseLocal(): void {
+    if (!this.sdkHasContext || !this.player) return;
+    // Uma tentativa por contexto confirmado, inclusive se o SDK rejeitar a Promise.
+    this.sdkHasContext = false;
+    try { void this.player.pause().catch(() => {}); } catch { /* best effort */ }
+  }
+
+  /** Novo ready + transferência aceita; init em cache não comprova recuperação. */
+  async recover(): Promise<void> {
+    this.stopEpoch += 1;
+    this.player?.disconnect();
+    this.deviceId = null;
+    this.sdkHasContext = false;
+    this.connectPromise = null;
+    await this.init();
+    if (!await this.refreshDevice()) {
+      throw new AudioFailure("temporary", "O Spotify não confirmou a recuperação do device. Tente novamente.");
+    }
+  }
   
     /** Reativa este device no Connect (corrige device "zumbi"/travado). */
-    async refreshDevice(): Promise<boolean> {
+    async refreshDevice(attempt = 0, rejectedToken?: string): Promise<boolean> {
       if (!this.deviceId) return false;
       try {
-        const token = await getValidAccessToken();
+        const token = await getValidAccessToken(attempt > 0, rejectedToken);
         const res = await fetch("https://api.spotify.com/v1/me/player", {
           method: "PUT",
           headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
           body: JSON.stringify({ device_ids: [this.deviceId], play: false }),
         });
-        return res.ok || res.status === 204;
+        if (res.status === 401 && attempt === 0) return this.refreshDevice(1, token);
+        if (!res.ok) throw new AudioFailure("temporary", "Falha ao reativar o device do Spotify (" + res.status + ").", res.status);
+        return true;
       } catch (error) {
-        if (isNotLoggedInError(error)) throw error;
-        return false;
+        throw audioFailure(error);
       }
     }
 
@@ -476,7 +497,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
   }
 
   pause(): void {
-    this.player?.pause().catch(() => {});
+    this.pauseLocal();
     void this.sendPauseCommand().catch(() => {});
   }
 
@@ -502,6 +523,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
     this.readyWaiters = [];
     readyWaiters.forEach((w) => w.reject(new Error("O player foi encerrado.")));
     this.player = null;
+    this.sdkHasContext = false;
     this.deviceId = null;
     this.trackUri = null;
     this.connectPromise = null;
@@ -509,6 +531,7 @@ export class SpotifyWebPlayer implements AudioPlayer {
   }
 
   private failConnection(cause: string | AudioFailure): void {
+    this.sdkHasContext = false;
     const error = typeof cause === "string" ? new AudioFailure("temporary", cause) : cause;
     const waiters = this.readyWaiters;
     this.readyWaiters = [];

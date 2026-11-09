@@ -70,7 +70,7 @@ export function useAudio(): UseAudioResult {
     setServiceStatus("connecting");
     try {
       await getValidAccessToken();
-      await getSpotifyWebPlayer().init();
+      await getSpotifyWebPlayer().recover();
       if (operation !== connectionSeq.current) return false;
       setFailure(null);
       setServiceError(null);

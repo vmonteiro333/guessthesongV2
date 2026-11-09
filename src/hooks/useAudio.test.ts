@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
     handleAuthRedirect: vi.fn(), loadTokens: vi.fn(), startLogin: vi.fn(), getValidAccessToken: vi.fn(),
   },
   player: {
-    init: vi.fn(), onError: vi.fn(), stopNow: vi.fn(), enforceStop: vi.fn(), load: vi.fn(),
+    init: vi.fn(), recover: vi.fn(), onError: vi.fn(), stopNow: vi.fn(), enforceStop: vi.fn(), load: vi.fn(),
     playFromStart: vi.fn(), waitForPlaybackEvidence: vi.fn(), refreshDevice: vi.fn(), fetchWebPlaybackState: vi.fn(),
   },
 }));
@@ -29,6 +29,7 @@ beforeEach(async () => {
   mocks.auth.getValidAccessToken.mockResolvedValue("fake");
   mocks.auth.handleAuthRedirect.mockResolvedValue(false);
   mocks.player.init.mockResolvedValue(undefined);
+  mocks.player.recover.mockResolvedValue(undefined);
   mocks.player.enforceStop.mockResolvedValue(undefined);
   mocks.player.onError.mockImplementation((callback) => { sdkError = callback; return vi.fn(); });
   mocks.player.load.mockResolvedValue(undefined);
@@ -86,6 +87,24 @@ describe("recuperação de áudio", () => {
     expect(host.current.failure).toBeNull();
     expect(mocks.auth.startLogin).not.toHaveBeenCalled();
     expect(mocks.player.playFromStart).toHaveBeenCalledTimes(1);
+    expect(mocks.player.recover).toHaveBeenCalledTimes(1);
+  });
+
+  it("retry não aceita init em cache se a recuperação do device falha", async () => {
+    sdkError(new AudioFailure("temporary", "device offline"));
+    mocks.player.recover.mockRejectedValueOnce(new AudioFailure("temporary", "transferência recusada", 503));
+    await expect(host.current.retry()).resolves.toBe(false);
+    expect(host.current.serviceStatus).toBe("error");
+    expect(mocks.auth.startLogin).not.toHaveBeenCalled();
+    await expect(host.current.retry()).resolves.toBe(true);
+    expect(host.current.serviceStatus).toBe("ready");
+  });
+
+  it("retry com autenticação realmente inválida continua exigindo reconexão", async () => {
+    mocks.player.recover.mockRejectedValueOnce(new AudioFailure("auth", "NOT_LOGGED_IN"));
+    await expect(host.current.retry()).resolves.toBe(false);
+    expect(host.current.serviceStatus).toBe("needs_login");
+    expect(mocks.auth.startLogin).not.toHaveBeenCalled();
   });
 
   it("ignora erro de um carregamento antigo após stop", async () => {

@@ -20,20 +20,28 @@ function authHeaders(): (string | null)[] {
 }
 
 class FakeSdkPlayer {
+  static latest: FakeSdkPlayer;
+  listeners = new Map<string, (event: any) => void>();
+  pause = vi.fn(async () => {
+    this.emit("playback_error", { message: "Cannot perform operation; no list was loaded." });
+  });
+  constructor() { FakeSdkPlayer.latest = this; }
+  emit(event: string, payload: unknown): void { this.listeners.get(event)?.(payload); }
   private ready?: (event: { device_id: string }) => void;
 
   addListener(event: string, callback: (event: { device_id: string }) => void): boolean {
+    this.listeners.set(event, callback);
     if (event === "ready") this.ready = callback;
     return true;
   }
 
-  async connect(): Promise<boolean> {
+  connect = vi.fn(async (): Promise<boolean> => {
     setTimeout(() => this.ready?.({ device_id: "fake-device" }), 0);
     return true;
-  }
+  });
 
   async activateElement(): Promise<void> {}
-  disconnect(): void {}
+  disconnect = vi.fn();
 }
 
 beforeEach(async () => {
@@ -70,6 +78,101 @@ afterEach(() => {
 });
 
 describe("recuperação de autenticação do SpotifyWebPlayer", () => {
+  it("parada sem contexto local não comanda pause no SDK nem gera erros recursivos", async () => {
+    const errors = vi.fn(() => { if (errors.mock.calls.length < 5) player.stopNow(); });
+    player.onError(errors);
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    player.stopNow();
+    await player.enforceStop(0);
+    player.pause();
+    expect(FakeSdkPlayer.latest.pause).not.toHaveBeenCalled();
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it("no list sem contexto local não invalida a conexão OAuth", () => {
+    const errors = vi.fn();
+    player.onError(errors);
+    FakeSdkPlayer.latest.emit("playback_error", { message: "Cannot perform operation; no list was loaded." });
+    expect(errors).not.toHaveBeenCalled();
+    expect(storage.has(TOKENS_KEY)).toBe(true);
+  });
+
+  it("erro com contexto local é reportado uma vez e não gera pause recursivo", async () => {
+    const sdk = FakeSdkPlayer.latest;
+    sdk.emit("player_state_changed", {
+      paused: false, position: 50, duration: 100_000,
+      track_window: { current_track: { uri: "spotify:track:0000000000000000000000" } },
+    });
+    const errors = vi.fn(() => player.stopNow());
+    player.onError(errors);
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    sdk.emit("playback_error", { message: "Cannot perform operation; no list was loaded." });
+    expect(errors).toHaveBeenCalledTimes(1);
+    expect(errors.mock.calls[0]).toEqual([expect.objectContaining({ kind: "temporary" })]);
+    expect(sdk.pause).not.toHaveBeenCalled();
+  });
+
+  it("corte mantém pause local com contexto e consome rejeição assíncrona", async () => {
+    const sdk = FakeSdkPlayer.latest;
+    sdk.emit("player_state_changed", {
+      paused: false, position: 50, duration: 100_000,
+      track_window: { current_track: { uri: "spotify:track:0000000000000000000000" } },
+    });
+    sdk.pause.mockRejectedValueOnce(new Error("no list was loaded"));
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    player.stopNow(); player.stopNow();
+    await Promise.resolve();
+    expect(sdk.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["authentication_error", "account_error", "playback_error"])("%s real continua sendo reportado sem contexto", (event) => {
+    const errors = vi.fn();
+    player.onError(errors);
+    FakeSdkPlayer.latest.emit(event, { message: "real failure" });
+    expect(errors).toHaveBeenCalledWith(expect.objectContaining({ kind: event === "authentication_error" ? "auth" : "temporary" }));
+  });
+
+  it("recuperação exige novo ready e transferência aceita, preservando a faixa", async () => {
+    const sdk = FakeSdkPlayer.latest;
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await player.recover();
+    expect(sdk.disconnect).toHaveBeenCalledTimes(1);
+    expect(sdk.connect).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({ device_ids: ["fake-device"], play: false });
+    await player.playFromStart();
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ uris: ["spotify:track:0000000000000000000000"], position_ms: 0 });
+  });
+
+  it("recuperação não termina antes de novo ready", async () => {
+    vi.useFakeTimers();
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    const finished = vi.fn();
+    const recovering = player.recover().then(finished);
+    await Promise.resolve(); await Promise.resolve();
+    expect(finished).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    await recovering;
+    expect(finished).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([403, 404, 503])("recuperação recusada com %i permanece temporária", async (status) => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status }));
+    await expect(player.recover()).rejects.toMatchObject({ kind: "temporary", status });
+    expect(storage.has(TOKENS_KEY)).toBe(true);
+  });
+
+  it("transferência recupera 401 sem OAuth e preserva invalid_grant verdadeiro", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await expect(player.recover()).resolves.toBeUndefined();
+    expect(authHeaders()).toEqual([`Bearer ${OLD_TOKEN}`, `Bearer ${NEW_TOKEN}`]);
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 }));
+    await expect(player.recover()).rejects.toMatchObject({ kind: "auth" });
+    expect(storage.has(TOKENS_KEY)).toBe(false);
+  });
   it.each([true, false])("indisponibilidade explícita só se aplica à faixa atual (%s)", async (sameTrack) => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       item: { uri: sameTrack ? "spotify:track:0000000000000000000000" : "spotify:track:1111111111111111111111", is_playable: false },

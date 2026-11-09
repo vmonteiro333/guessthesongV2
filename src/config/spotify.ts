@@ -17,6 +17,7 @@ export function getSpotifyRedirectUri(): string {
 
 export const SPOTIFY_SCOPES = [
   "streaming",
+  "user-read-email",
   "user-read-private",
   "user-modify-playback-state",
   "user-read-playback-state",

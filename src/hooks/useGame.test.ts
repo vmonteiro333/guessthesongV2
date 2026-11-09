@@ -72,6 +72,29 @@ describe("pausa e recuperação da partida", () => {
     expect(audio.playSnippet).toHaveBeenCalledTimes(1);
   });
 
+  it("no list preserva palpite, etapa, pontos, fila e snapshot durante falha e recuperação", async () => {
+    host = new HookHarness(() => useGame(audio, playlist, difficulty, session()));
+    await host.settle();
+    const before = host.current.getProgress();
+    const snapshot = session();
+    saveGameSession(snapshot, [playlist]);
+    const stored = window.sessionStorage.getItem(SESSION_KEY);
+    const failure = new AudioFailure("temporary", "Cannot perform operation; no list was loaded.");
+    audio.failure = failure; audio.serviceStatus = "error";
+    host.rerender(); await host.settle();
+    expect(host.current.gameStatus).toBe("paused");
+    expect(host.current.getProgress()).toEqual(before);
+    vi.mocked(audio.retry).mockResolvedValueOnce(false);
+    await host.current.retryRecovery(); await host.settle();
+    expect(host.current.gameStatus).toBe("paused");
+    expect(window.sessionStorage.getItem(SESSION_KEY)).toBe(stored);
+    audio.failure = null; audio.serviceStatus = "ready";
+    await host.current.retryRecovery(); await host.settle();
+    expect(host.current.getProgress()).toEqual(before);
+    expect(window.sessionStorage.getItem(SESSION_KEY)).toBe(stored);
+    expect(audio.login).not.toHaveBeenCalled();
+  });
+
   it.each(["load", "play"])("ignora conclusão antiga de %s depois da pausa", async (where) => {
     const pending = deferred<"completed">();
     host = new HookHarness(() => useGame(audio, playlist, difficulty));
